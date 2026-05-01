@@ -5,6 +5,22 @@ import { useAppStore } from '@/store/app-store';
 import { t } from '@/lib/i18n';
 import { toast } from 'sonner';
 
+/** Ensure all dimension values have feet/inches as numbers */
+function normalizeDimensions(dims: Record<string, unknown> | undefined): Record<string, { feet: number; inches: number }> {
+  if (!dims) return {};
+  const result: Record<string, { feet: number; inches: number }> = {};
+  for (const [key, val] of Object.entries(dims)) {
+    if (val && typeof val === 'object' && 'feet' in val && 'inches' in val) {
+      const d = val as { feet: unknown; inches: unknown };
+      result[key] = {
+        feet: typeof d.feet === 'number' ? d.feet : Number(d.feet) || 0,
+        inches: typeof d.inches === 'number' ? d.inches : Number(d.inches) || 0,
+      };
+    }
+  }
+  return result;
+}
+
 export function useAnalysis() {
   const lang = useAppStore((s) => s.lang);
   const setState = useAppStore((s) => s.setState);
@@ -21,26 +37,14 @@ export function useAnalysis() {
 
     setState('analyzing');
     clearAnalysisMessages();
-
-    const messages = [
-      t(lang, 'analyzing.extractingDimensions'),
-      t(lang, 'analyzing.identifyingMaterials'),
-      t(lang, 'analyzing.analyzingShape'),
-      t(lang, 'analyzing.categorizing'),
-      t(lang, 'analyzing.generatingSpecs'),
-    ];
-
-    // Simulate progress messages
-    for (let i = 0; i < messages.length; i++) {
-      await new Promise((r) => setTimeout(r, 800));
-      addAnalysisMessage(messages[i]);
-    }
+    addAnalysisMessage(t(lang, 'analyzing.extractingDimensions'));
 
     try {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageBase64 }),
+        signal: AbortSignal.timeout(60000),
       });
 
       const data = await resp.json();
@@ -60,7 +64,7 @@ export function useAnalysis() {
           tags: data.data.tags || [],
           dimensions: {
             ...useAppStore.getState().furnitureData.dimensions,
-            ...(data.data.dimensions || {}),
+            ...normalizeDimensions(data.data.dimensions),
           },
           shapeProfile: {
             ...useAppStore.getState().furnitureData.shapeProfile,
@@ -68,9 +72,10 @@ export function useAnalysis() {
           },
         });
         setState('editing');
-        toast.success('Analysis complete!');
+        toast.success(t(lang, 'toasts.pdfsGenerated').replace('PDFs', 'Analysis'));
       } else {
-        toast.error(data.error || t(lang, 'toasts.analysisFailed'));
+        const detail = data.details ? ` — ${data.details}` : '';
+        toast.error(`${data.error || t(lang, 'toasts.analysisFailed')}${detail}`);
         setState('upload');
       }
     } catch (err) {

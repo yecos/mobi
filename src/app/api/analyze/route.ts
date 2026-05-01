@@ -190,17 +190,29 @@ async function tryGemini(base64: string, mimeType: string, retryCount = 0): Prom
 
 function parseAIResponse(content: string): { parsed: unknown } | { error: string } {
   let jsonStr = content.trim();
+  // Strip markdown code blocks
   if (jsonStr.includes('```json')) {
     jsonStr = jsonStr.split('```json')[1].split('```')[0].trim();
   } else if (jsonStr.includes('```')) {
     jsonStr = jsonStr.split('```')[1].split('```')[0].trim();
+  }
+  // Strip leading "Here is..." text that some models add before JSON
+  const firstBrace = jsonStr.indexOf('{');
+  const firstBracket = jsonStr.indexOf('[');
+  if (firstBrace > 0 || firstBracket > 0) {
+    const start = firstBrace >= 0 && (firstBracket < 0 || firstBrace < firstBracket) ? firstBrace : firstBracket;
+    const lastBrace = jsonStr.lastIndexOf('}');
+    const lastBracket = jsonStr.lastIndexOf(']');
+    const end = Math.max(lastBrace, lastBracket);
+    jsonStr = jsonStr.substring(start, end + 1);
   }
   jsonStr = jsonStr.trim();
 
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     return { parsed };
-  } catch {
+  } catch (e) {
+    console.error('[analyze] JSON parse failed. Raw (first 500 chars):', content.substring(0, 500));
     return { error: 'Failed to parse furniture data from AI response' };
   }
 }
