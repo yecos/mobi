@@ -60,6 +60,9 @@ export interface FurnitureData {
   tags: string[];
   observations: string;
   shapeProfile: ShapeProfile;
+  style?: string;  // e.g. Moderno, Clásico, Minimalista, Industrial, Escandinavo, Rústico
+  finish?: string;  // Color/finish description
+  specialFeature?: string;  // Special feature description
 }
 
 export const defaultFurnitureData: FurnitureData = {
@@ -83,6 +86,9 @@ export const defaultFurnitureData: FurnitureData = {
   category: 'sofa',
   tags: [],
   observations: '',
+  style: '',
+  finish: '',
+  specialFeature: '',
   shapeProfile: {
     bodyShape: 'rectangular',
     cornerStyle: 'sharp',

@@ -16,9 +16,10 @@ interface ApprovalViewProps {
   onApprove: () => void;
   onReject: () => void;
   isSaving?: boolean;
+  conceptImageBase64?: string | null;
 }
 
-export function ApprovalView({ furnitureData, svgViews, lang, onApprove, onReject, isSaving }: ApprovalViewProps) {
+export function ApprovalView({ furnitureData, svgViews, lang, onApprove, onReject, isSaving, conceptImageBase64 }: ApprovalViewProps) {
   const widthCm = ((furnitureData.dimensions.width.feet * 12 + furnitureData.dimensions.width.inches) * 2.54).toFixed(0);
   const heightCm = ((furnitureData.dimensions.height.feet * 12 + furnitureData.dimensions.height.inches) * 2.54).toFixed(0);
 
@@ -37,6 +38,22 @@ export function ApprovalView({ furnitureData, svgViews, lang, onApprove, onRejec
       </div>
 
       <SvgPreview svgViews={svgViews} className="mb-6" />
+
+      {/* AI Concept Sketch */}
+      {conceptImageBase64 && (
+        <Card className="border-stone-200 mb-6">
+          <CardContent className="p-4">
+            <h3 className="text-sm font-semibold text-stone-800 mb-2">
+              {lang === 'en' ? 'AI Concept Sketch' : 'Boceto AI'}
+            </h3>
+            <img
+              src={`data:image/png;base64,${conceptImageBase64}`}
+              alt="AI Concept"
+              className="w-full max-w-md mx-auto rounded border border-stone-200"
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Furniture info summary */}
       <Card className="border-stone-200 mb-6">

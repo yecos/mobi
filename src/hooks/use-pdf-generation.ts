@@ -20,6 +20,9 @@ export function usePdfGeneration() {
   const svgViews = useAppStore((s) => s.svgViews);
   const setSvgViews = useAppStore((s) => s.setSvgViews);
   const setApproved = useAppStore((s) => s.setApproved);
+  const conceptImageBase64 = useAppStore((s) => s.conceptImageBase64);
+  const setConceptImage = useAppStore((s) => s.setConceptImage);
+  const setConceptPrompt = useAppStore((s) => s.setConceptPrompt);
 
   const downloadPdf = useCallback((base64: string, filename: string) => {
     const byteCharacters = atob(base64);
@@ -95,8 +98,31 @@ export function usePdfGeneration() {
         // Step 1: Generate AI technical drawing
         await generateTechnicalDrawing();
 
-        // Get the latest svgViews from the store
+        // Step 1b: Generate AI concept sketch (non-blocking, non-fatal)
+        const currentConceptImage = useAppStore.getState().conceptImageBase64;
+        if (!currentConceptImage) {
+          try {
+            const conceptResp = await fetch('/api/generate-concept', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ furnitureData }),
+            });
+            const conceptData = await conceptResp.json();
+            if (conceptData.success && conceptData.conceptImageBase64) {
+              setConceptImage(conceptData.conceptImageBase64);
+              if (conceptData.conceptPrompt) {
+                setConceptPrompt(conceptData.conceptPrompt);
+              }
+            }
+          } catch (err) {
+            console.warn('[pdf-client] Concept generation error (non-fatal):', err);
+          }
+        }
+
+        // Get the latest svgViews and concept from the store
         const currentSvgViews = useAppStore.getState().svgViews;
+        const latestConceptImage = useAppStore.getState().conceptImageBase64;
+        const latestConceptPrompt = useAppStore.getState().conceptPrompt;
 
         // Step 2: Generate metric PDF
         let metricResult: string | null = null;
@@ -113,6 +139,8 @@ export function usePdfGeneration() {
               unitSystem: 'metric',
               technicalDrawingBase64: null,
               svgViews: currentSvgViews,
+              conceptImageBase64: latestConceptImage,
+              conceptPrompt: latestConceptPrompt,
             }),
             signal: metricController.signal,
           });
@@ -143,6 +171,8 @@ export function usePdfGeneration() {
               unitSystem: 'imperial',
               technicalDrawingBase64: null,
               svgViews: currentSvgViews,
+              conceptImageBase64: latestConceptImage,
+              conceptPrompt: latestConceptPrompt,
             }),
             signal: imperialController.signal,
           });
@@ -170,7 +200,7 @@ export function usePdfGeneration() {
         setState('editing');
       }
     },
-    [furnitureData, lang, setState, setMetricPdf, setImperialPdf, generateTechnicalDrawing]
+    [furnitureData, lang, setState, setMetricPdf, setImperialPdf, setConceptImage, setConceptPrompt, generateTechnicalDrawing]
   );
 
   const handleGenerateCombined = useCallback(

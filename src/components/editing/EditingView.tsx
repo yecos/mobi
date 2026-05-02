@@ -7,6 +7,7 @@ import type { FurnitureData, Dimensions } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { BrandInfoCard } from './BrandInfoCard';
 import { ColorFinishesCard } from './ColorFinishesCard';
+import { StyleInfoCard } from './StyleInfoCard';
 import { ProductDetailsCard } from './ProductDetailsCard';
 import { DimensionsCard } from './DimensionsCard';
 import { MaterialsCard } from './MaterialsCard';
@@ -66,6 +67,7 @@ export function EditingView({
 
           <BrandInfoCard furnitureData={furnitureData} onUpdateField={onUpdateField} lang={lang} />
           <ColorFinishesCard furnitureData={furnitureData} onUpdateField={onUpdateField} lang={lang} />
+          <StyleInfoCard furnitureData={furnitureData} onUpdateField={onUpdateField} lang={lang} />
         </div>
 
         {/* Right: Form Fields */}

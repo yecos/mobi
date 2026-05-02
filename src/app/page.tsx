@@ -41,6 +41,7 @@ export default function Home() {
   const catalogPdf = useAppStore((s) => s.catalogPdf);
   const catalogItems = useAppStore((s) => s.catalogItems);
   const svgViews = useAppStore((s) => s.svgViews);
+  const conceptImageBase64 = useAppStore((s) => s.conceptImageBase64);
   const updateField = useAppStore((s) => s.updateField);
   const setUnitMode = useAppStore((s) => s.setUnitMode);
   const resetAll = useAppStore((s) => s.resetAll);
@@ -300,6 +301,7 @@ export default function Home() {
             onApprove={onApprove}
             onReject={onReject}
             isSaving={isSaving}
+            conceptImageBase64={conceptImageBase64}
           />
         )}
       </div>

@@ -39,6 +39,10 @@ interface AppStore {
   svgViews: { plant: string | null; frontal: string | null; lateral: string | null };
   isApproved: boolean;
 
+  // AI Concept state
+  conceptImageBase64: string | null;
+  conceptPrompt: string | null;
+
   // Actions
   setState: (state: AppState) => void;
   setFurnitureData: (data: FurnitureData) => void;
@@ -62,6 +66,8 @@ interface AppStore {
   setTechnicalDrawing: (base64: string | null) => void;
   setSvgViews: (views: { plant: string; frontal: string; lateral: string }) => void;
   setApproved: (approved: boolean) => void;
+  setConceptImage: (base64: string | null) => void;
+  setConceptPrompt: (prompt: string | null) => void;
   addCatalogItem: (item: FurnitureData, image: string) => void;
   clearCatalog: () => void;
   resetForNewPiece: () => void;
@@ -90,6 +96,8 @@ export const useAppStore = create<AppStore>()(
       metricEdits: {},
       svgViews: { plant: null, frontal: null, lateral: null },
       isApproved: false,
+      conceptImageBase64: null,
+      conceptPrompt: null,
 
       setState: (state) => set({ appState: state }),
       setFurnitureData: (data) => set({ furnitureData: data }),
@@ -145,6 +153,8 @@ export const useAppStore = create<AppStore>()(
       setTechnicalDrawing: (base64) => set({ technicalDrawingBase64: base64 }),
       setSvgViews: (views) => set({ svgViews: views }),
       setApproved: (approved) => set({ isApproved: approved }),
+      setConceptImage: (base64) => set({ conceptImageBase64: base64 }),
+      setConceptPrompt: (prompt) => set({ conceptPrompt: prompt }),
       addCatalogItem: (item, image) => set((s) => ({
         catalogItems: [...s.catalogItems, item],
         catalogImages: [...s.catalogImages, image],
@@ -163,6 +173,8 @@ export const useAppStore = create<AppStore>()(
         metricEdits: {},
         svgViews: { plant: null, frontal: null, lateral: null },
         isApproved: false,
+        conceptImageBase64: null,
+        conceptPrompt: null,
       }),
       resetAll: () => set({
         appState: 'upload',
@@ -180,6 +192,8 @@ export const useAppStore = create<AppStore>()(
         metricEdits: {},
         svgViews: { plant: null, frontal: null, lateral: null },
         isApproved: false,
+        conceptImageBase64: null,
+        conceptPrompt: null,
       }),
     }),
     {

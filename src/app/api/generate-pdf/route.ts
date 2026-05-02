@@ -19,6 +19,8 @@ export async function POST(req: NextRequest) {
       technicalDrawingBase64,
       svgViews,
       catalogSvgViews,
+      conceptImageBase64,
+      conceptPrompt,
     } = body as {
       furnitureData: FurnitureData;
       imageBase64?: string;
@@ -29,6 +31,8 @@ export async function POST(req: NextRequest) {
       technicalDrawingBase64?: string;
       svgViews?: SvgViews;
       catalogSvgViews?: SvgViews[];
+      conceptImageBase64?: string;
+      conceptPrompt?: string;
     };
 
     if (!furnitureData && !catalogItems) {
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
 
     // Combined mode
     if (mode === 'combined') {
-      const buffer = await generateCombinedPDF(furnitureData, imageBuffer, technicalDrawingBuffer, svgViews ?? null);
+      const buffer = await generateCombinedPDF(furnitureData, imageBuffer, technicalDrawingBuffer, svgViews ?? null, conceptImageBase64 ?? null, conceptPrompt ?? null);
       return NextResponse.json({
         success: true,
         mode: 'combined',
@@ -63,7 +67,7 @@ export async function POST(req: NextRequest) {
     const systems: ('metric' | 'imperial')[] = unitSystem ? [unitSystem] : ['metric', 'imperial'];
     const results: Record<string, string> = {};
     for (const sys of systems) {
-      const buffer = await generateSinglePDF(furnitureData, sys, imageBuffer, technicalDrawingBuffer, svgViews ?? null);
+      const buffer = await generateSinglePDF(furnitureData, sys, imageBuffer, technicalDrawingBuffer, svgViews ?? null, conceptImageBase64 ?? null, conceptPrompt ?? null);
       results[sys] = buffer.toString('base64');
     }
 

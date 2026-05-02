@@ -52,33 +52,31 @@ const P_SPEC_W = PW - P_SPEC_X - MR;
 // Section divider
 const DIV1_Y = P_PHOTO_BOT - 12;  // 566
 
-// Technical Overview section
+// Technical Overview section - NEW LAYOUT
+// Frontal view: full width, prominent
 const T_TITLE_Y = DIV1_Y - 22;  // 544
-const T_DRAW_TOP = T_TITLE_Y - 12;  // 532
-const T_DRAW_H = 260;  // generous height for drawings
-const T_DRAW_BOT = T_DRAW_TOP - T_DRAW_H;  // 272
-const T_DRAW_W = 260;
-const T_DRAW_X = MX;
+const T_FRONT_TOP = T_TITLE_Y - 12;  // 532
+const T_FRONT_H = 195;
+const T_FRONT_W = USABLE_W;  // 515pt full width
+const T_FRONT_BOT = T_FRONT_TOP - T_FRONT_H;  // 337
 
-// Drawing sub-layout: 3 views stacked vertically
-const T_VIEW_GAP = 8;
-const T_VIEW_H = (T_DRAW_H - T_VIEW_GAP * 2 - 30) / 3;  // ~70 each with labels
-const T_FRONT_TOP = T_DRAW_TOP;
-const T_SIDE_TOP = T_DRAW_TOP - T_VIEW_H - T_VIEW_GAP - 14;
-const T_PLANT_TOP = T_SIDE_TOP - T_VIEW_H - T_VIEW_GAP - 14;
+// Plant + Lateral: side by side below frontal
+const T_SIDE_TOP = T_FRONT_BOT - 20;  // 317 (20pt gap for label)
+const T_SIDE_H = 185;
+const T_HALF_W = (USABLE_W - 12) / 2;  // ~251.5pt each with 12pt gap
+const T_PLANT_X = MX;
+const T_LATERAL_X = MX + T_HALF_W + 12;
 
-// Bullet points on the right of drawings
-const T_BULLET_X = T_DRAW_X + T_DRAW_W + 20;
-const T_BULLET_W = PW - T_BULLET_X - MR;
+const T_SIDE_BOT = T_SIDE_TOP - T_SIDE_H;  // 132
 
 // Section divider 2
-const DIV2_Y = T_DRAW_BOT - 12;  // 260
+const DIV2_Y = T_SIDE_BOT - 12;  // 120
 
 // Materials section
-const M_TITLE_Y = DIV2_Y - 22;  // 238
+const M_TITLE_Y = DIV2_Y - 22;  // 98
 const M_TABLE_TOP = M_TITLE_Y - 16;
-const M_ROW_H = 16;
-const MAX_TABLE_ROWS = 6;
+const M_ROW_H = 14;
+const MAX_TABLE_ROWS = 4;
 
 // Table columns
 const TABLE_LEFT = MX + 8;
@@ -145,6 +143,24 @@ function wrapText(text: string, maxLen: number): string[] {
   }
   if (cur) lines.push(cur);
   return lines;
+}
+
+// ============================================================================
+// Background removal helper
+// ============================================================================
+
+async function removeBackground(imageBuffer: Buffer): Promise<Buffer | null> {
+  try {
+    const { removeBackground: bgRemoval } = await import('@imgly/background-removal');
+    const blob = await bgRemoval(imageBuffer, {
+      output: { format: 'image/png' },
+    });
+    const arrayBuffer = await blob.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (err) {
+    console.warn('[pdf] Background removal failed, using original:', err);
+    return null;
+  }
 }
 
 // ============================================================================
@@ -224,22 +240,6 @@ async function processView(
   }
 }
 
-function calcScale(data: FurnitureData): string {
-  const w = dimensionToCm(data.dimensions.width);
-  const h = dimensionToCm(data.dimensions.height);
-  const d = dimensionToCm(data.dimensions.depth);
-  const maxDim = Math.max(w, h, d, 1);
-
-  const stdScales = [5, 10, 15, 20, 25, 50, 75, 100];
-  const target = maxDim / 12;
-  let best = stdScales[0];
-  for (const s of stdScales) {
-    if (s >= target) { best = s; break; }
-    best = s;
-  }
-  return `1:${best}`;
-}
-
 // ============================================================================
 // PDF Content Stream builder
 // ============================================================================
@@ -281,6 +281,25 @@ class CS {
     return this;
   }
 
+  /** Draw image preserving aspect ratio within bounding box */
+  fitImage(name: string, boxX: number, boxY: number, boxW: number, boxH: number, imgW: number, imgH: number): this {
+    const imgAspect = imgW / imgH;
+    const boxAspect = boxW / boxH;
+    let drawW: number, drawH: number, drawX: number, drawY: number;
+    if (imgAspect > boxAspect) {
+      drawW = boxW;
+      drawH = boxW / imgAspect;
+      drawX = boxX;
+      drawY = boxY + (boxH - drawH) / 2;
+    } else {
+      drawH = boxH;
+      drawW = boxH * imgAspect;
+      drawX = boxX + (boxW - drawW) / 2;
+      drawY = boxY;
+    }
+    return this.img(name, drawX, drawY, drawW, drawH);
+  }
+
   /** Draw a rounded rectangle (filled) */
   roundRectFill(x: number, y: number, w: number, h: number, radius: number, r: number, g: number, b: number): this {
     this.ops.push('q',
@@ -307,6 +326,15 @@ class CS {
 // Build content stream for a single page (Domellini-style portrait)
 // ============================================================================
 
+interface ImageDimensions {
+  frontalImgW: number;
+  frontalImgH: number;
+  lateralImgW: number;
+  lateralImgH: number;
+  plantImgW: number;
+  plantImgH: number;
+}
+
 function buildPageContent(
   data: FurnitureData,
   unitSystem: 'metric' | 'imperial',
@@ -314,10 +342,18 @@ function buildPageContent(
   hasFrontal: boolean,
   hasLateral: boolean,
   hasPlant: boolean,
+  imgDims?: ImageDimensions,
 ): Buffer {
   const c = new CS();
   const units = unitSystem === 'metric' ? 'cm' : 'in';
-  const scale = calcScale(data);
+
+  // Default image dimensions if not provided
+  const frontalImgW = imgDims?.frontalImgW ?? 515;
+  const frontalImgH = imgDims?.frontalImgH ?? 400;
+  const lateralImgW = imgDims?.lateralImgW ?? 400;
+  const lateralImgH = imgDims?.lateralImgH ?? 300;
+  const plantImgW = imgDims?.plantImgW ?? 400;
+  const plantImgH = imgDims?.plantImgH ?? 300;
 
   // ── 1. BRAND HEADER ────────────────────────────────────────────────
   // Brand name in warm beige, left-aligned
@@ -372,10 +408,20 @@ function buildPageContent(
     ['Materials', data.materials?.map(m => m.material).join(', ') || 'N/A'],
     ['Brand', data.brand || 'Unknown'],
     ['Reference', data.referenceNumber || 'N/A'],
-    ['Scale', scale],
     ['Units', units],
     ['Quantity', String(data.quantity || 1)],
   ];
+
+  // Style info
+  if (data.style) {
+    specRows.push(['Style', data.style]);
+  }
+  if (data.finish) {
+    specRows.push(['Finish', data.finish]);
+  }
+  if (data.specialFeature) {
+    specRows.push(['Feature', data.specialFeature]);
+  }
 
   // Color finishes
   if (data.colorFinishes && data.colorFinishes.length > 0) {
@@ -404,107 +450,47 @@ function buildPageContent(
   c.setColor(COL_BEIGE.r, COL_BEIGE.g, COL_BEIGE.b);
   c.bold(MX, T_TITLE_Y, 'Technical Overview', 14);
 
-  // Drawing area background
-  c.roundRectFill(T_DRAW_X, T_DRAW_BOT, T_DRAW_W, T_DRAW_H, 4,
+  // Front view - full width
+  c.roundRectFill(MX, T_FRONT_BOT, T_FRONT_W, T_FRONT_H, 4,
     COL_WHITE.r, COL_WHITE.g, COL_WHITE.b);
-  c.rectStroke(T_DRAW_X, T_DRAW_BOT, T_DRAW_W, T_DRAW_H, 0.3);
+  c.rectStroke(MX, T_FRONT_BOT, T_FRONT_W, T_FRONT_H, 0.3);
 
-  // Front view (top)
-  const viewW = T_DRAW_W - 16;
-  const viewH = T_VIEW_H;
   if (hasFrontal) {
-    c.img('Im1', T_DRAW_X + 8, T_FRONT_TOP - viewH, viewW, viewH);
+    c.fitImage('Im1', MX, T_FRONT_BOT, T_FRONT_W, T_FRONT_H, frontalImgW, frontalImgH);
   } else {
-    c.rectFill(T_DRAW_X + 8, T_FRONT_TOP - viewH, viewW, viewH,
+    c.rectFill(MX, T_FRONT_BOT, T_FRONT_W, T_FRONT_H,
       COL_BEIGE_LIGHT.r, COL_BEIGE_LIGHT.g, COL_BEIGE_LIGHT.b);
   }
   c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
-  c.norm(T_DRAW_X + 12, T_FRONT_TOP + 2, 'Front View', 7);
+  c.bold(MX + 4, T_FRONT_TOP + 2, 'Front View', 9);
 
-  // Side view (middle)
-  if (hasLateral) {
-    c.img('Im2', T_DRAW_X + 8, T_SIDE_TOP - viewH, viewW, viewH);
-  } else {
-    c.rectFill(T_DRAW_X + 8, T_SIDE_TOP - viewH, viewW, viewH,
-      COL_BEIGE_LIGHT.r, COL_BEIGE_LIGHT.g, COL_BEIGE_LIGHT.b);
-  }
-  c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
-  c.norm(T_DRAW_X + 12, T_SIDE_TOP + 2, 'Side View', 7);
+  // Plant view - left half
+  c.roundRectFill(T_PLANT_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H, 4,
+    COL_WHITE.r, COL_WHITE.g, COL_WHITE.b);
+  c.rectStroke(T_PLANT_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H, 0.3);
 
-  // Plant view (bottom)
   if (hasPlant) {
-    c.img('Im3', T_DRAW_X + 8, T_PLANT_TOP - viewH, viewW, viewH);
+    c.fitImage('Im3', T_PLANT_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H, plantImgW, plantImgH);
   } else {
-    c.rectFill(T_DRAW_X + 8, T_PLANT_TOP - viewH, viewW, viewH,
+    c.rectFill(T_PLANT_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H,
       COL_BEIGE_LIGHT.r, COL_BEIGE_LIGHT.g, COL_BEIGE_LIGHT.b);
   }
   c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
-  c.norm(T_DRAW_X + 12, T_PLANT_TOP + 2, 'Top View', 7);
+  c.bold(T_PLANT_X + 4, T_SIDE_TOP + 2, 'Top View', 9);
 
-  // Bullet points on the right of drawings
-  const bulletX = T_BULLET_X;
-  let bulletY = T_TITLE_Y - 20;
-  const bulletGap = 16;
+  // Lateral view - right half
+  c.roundRectFill(T_LATERAL_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H, 4,
+    COL_WHITE.r, COL_WHITE.g, COL_WHITE.b);
+  c.rectStroke(T_LATERAL_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H, 0.3);
 
-  c.setColor(COL_DARK.r, COL_DARK.g, COL_DARK.b);
-
-  // Description
-  if (data.description) {
-    c.bold(bulletX, bulletY, 'Description', 10);
-    bulletY -= 14;
-    c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
-    const descLines = wrapText(data.description, 48);
-    for (let i = 0; i < Math.min(descLines.length, 4); i++) {
-      c.norm(bulletX + 4, bulletY, trunc(descLines[i], 48), 8);
-      bulletY -= 12;
-    }
-    bulletY -= 4;
+  if (hasLateral) {
+    c.fitImage('Im2', T_LATERAL_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H, lateralImgW, lateralImgH);
+  } else {
+    c.rectFill(T_LATERAL_X, T_SIDE_BOT, T_HALF_W, T_SIDE_H,
+      COL_BEIGE_LIGHT.r, COL_BEIGE_LIGHT.g, COL_BEIGE_LIGHT.b);
   }
-
-  // Shape profile highlights
-  c.setColor(COL_DARK.r, COL_DARK.g, COL_DARK.b);
-  const sp = data.shapeProfile;
-  if (sp) {
-    c.bold(bulletX, bulletY, 'Shape Profile', 10);
-    bulletY -= 14;
-    c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
-
-    const profileItems: string[] = [];
-    if (sp.bodyShape) profileItems.push(`Body: ${sp.bodyShape}`);
-    if (sp.legType && sp.legType !== 'none') profileItems.push(`Legs: ${sp.legType}`);
-    if (sp.hasBackrest) profileItems.push(`Backrest: ${sp.backrestShape || 'yes'}`);
-    if (sp.hasArmrests) profileItems.push(`Armrests: ${sp.armrestShape || 'yes'}`);
-    if (sp.cornerStyle) profileItems.push(`Corners: ${sp.cornerStyle}`);
-    if (sp.seatShape) profileItems.push(`Seat: ${sp.seatShape}`);
-
-    for (const item of profileItems.slice(0, 8)) {
-      c.norm(bulletX + 4, bulletY, `•  ${item}`, 8);
-      bulletY -= 12;
-    }
-    bulletY -= 4;
-  }
-
-  // Tags
-  if (data.tags && data.tags.length > 0) {
-    c.setColor(COL_DARK.r, COL_DARK.g, COL_DARK.b);
-    c.bold(bulletX, bulletY, 'Tags', 10);
-    bulletY -= 14;
-    c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
-    c.norm(bulletX + 4, bulletY, data.tags.join('  ·  '), 8);
-    bulletY -= 16;
-  }
-
-  // Lounge configurations
-  if (data.loungeConfigurations && data.loungeConfigurations.length > 0) {
-    c.setColor(COL_DARK.r, COL_DARK.g, COL_DARK.b);
-    c.bold(bulletX, bulletY, 'Configurations', 10);
-    bulletY -= 14;
-    c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
-    for (const lc of data.loungeConfigurations.slice(0, 4)) {
-      c.norm(bulletX + 4, bulletY, `•  ${lc.name}: ${lc.units} units`, 8);
-      bulletY -= 12;
-    }
-  }
+  c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
+  c.bold(T_LATERAL_X + 4, T_SIDE_TOP + 2, 'Side View', 9);
 
   // ── Section divider 2 ─────────────────────────────────────────────
   c.setColor(COL_LIGHT_GRAY.r, COL_LIGHT_GRAY.g, COL_LIGHT_GRAY.b);
@@ -538,15 +524,15 @@ function buildPageContent(
   // Data rows
   for (let i = 0; i < shown.length; i++) {
     const m = shown[i];
-    const ry = tblTopY - 18 - i * M_ROW_H;
+    const ry = tblTopY - 16 - i * M_ROW_H;
 
     if (i % 2 === 1) {
-      c.rectFill(TABLE_LEFT, ry - 6, tblW, M_ROW_H,
+      c.rectFill(TABLE_LEFT, ry - 4, tblW, M_ROW_H,
         COL_TABLE_ALT.r, COL_TABLE_ALT.g, COL_TABLE_ALT.b);
     }
 
     c.setColor(COL_LIGHT_GRAY.r, COL_LIGHT_GRAY.g, COL_LIGHT_GRAY.b);
-    c.line(TABLE_LEFT, ry - 7, TABLE_RIGHT, ry - 7, 0.2);
+    c.line(TABLE_LEFT, ry - 5, TABLE_RIGHT, ry - 5, 0.2);
 
     c.setColor(COL_DARK.r, COL_DARK.g, COL_DARK.b);
     let rx = TABLE_LEFT + 4;
@@ -557,7 +543,7 @@ function buildPageContent(
     c.norm(rx, ry, trunc(m.observations || '', 22), 8);
   }
 
-  let afterTable = tblTopY - 18 - shown.length * M_ROW_H - 8;
+  let afterTable = tblTopY - 16 - shown.length * M_ROW_H - 8;
   if (materials.length > MAX_TABLE_ROWS) {
     c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
     c.norm(TABLE_LEFT + 4, afterTable, `... and ${materials.length - MAX_TABLE_ROWS} more materials`, 8);
@@ -572,7 +558,7 @@ function buildPageContent(
     c.bold(MX, obsY, 'Observations', 11);
     c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
     const obsLines = wrapText(obsText, 85);
-    for (let i = 0; i < Math.min(obsLines.length, 3); i++) {
+    for (let i = 0; i < Math.min(obsLines.length, 2); i++) {
       c.norm(MX + 8, obsY - 14 - i * 12, trunc(obsLines[i], 85), 8);
     }
   }
@@ -588,6 +574,74 @@ function buildPageContent(
   // Dimension summary in footer
   const dimText = `H: ${displayDimension(hCm, unitSystem)}   ×   W: ${displayDimension(wCm, unitSystem)}   ×   D: ${displayDimension(dCm, unitSystem)}`;
   c.norm(PW - MR - dimText.length * 3.8, FOOTER_Y + 4, dimText, 7);
+
+  return c.build();
+}
+
+// ============================================================================
+// Build concept page content
+// ============================================================================
+
+function buildConceptPageContent(
+  data: FurnitureData,
+  conceptImgW: number,
+  conceptImgH: number,
+  prompt?: string,
+): Buffer {
+  const c = new CS();
+
+  // ── 1. BRAND HEADER ────────────────────────────────────────────────
+  c.setColor(COL_BEIGE.r, COL_BEIGE.g, COL_BEIGE.b);
+  c.bold(MX, H_BRAND_Y, 'MOBI', 14);
+  c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
+  c.norm(MX + 52, H_BRAND_Y, 'AI Concept Sketch', 9);
+
+  // Date on the right
+  c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
+  c.norm(PW - MR - 70, H_BRAND_Y, fmtDate(), 9);
+
+  // Thin separator line
+  c.setColor(COL_LIGHT_GRAY.r, COL_LIGHT_GRAY.g, COL_LIGHT_GRAY.b);
+  c.line(MX, H_BRAND_LINE, PW - MR, H_BRAND_LINE, 0.5);
+
+  // ── 2. PRODUCT TITLE ──────────────────────────────────────────────
+  c.setColor(COL_BEIGE.r, COL_BEIGE.g, COL_BEIGE.b);
+  const title = data.productName || 'Untitled Project';
+  c.bold((PW) / 2 - title.length * 4.5, P_TITLE_Y, title, 22);
+
+  // ── 3. SECTION TITLE ──────────────────────────────────────────────
+  c.setColor(COL_DARK.r, COL_DARK.g, COL_DARK.b);
+  c.bold(MX, P_TITLE_Y - 36, 'AI Concept Sketch', 16);
+
+  // ── 4. CONCEPT IMAGE (centered, large) ────────────────────────────
+  const conceptBoxW = USABLE_W;
+  const conceptBoxH = 480;
+  const conceptBoxX = MX;
+  const conceptBoxY = PH - 130 - conceptBoxH;  // position from bottom
+
+  // Background
+  c.roundRectFill(conceptBoxX, conceptBoxY, conceptBoxW, conceptBoxH, 6,
+    COL_WHITE.r, COL_WHITE.g, COL_WHITE.b);
+  c.rectStroke(conceptBoxX, conceptBoxY, conceptBoxW, conceptBoxH, 0.3);
+
+  // Image with aspect ratio preservation
+  c.fitImage('ImC', conceptBoxX, conceptBoxY, conceptBoxW, conceptBoxH, conceptImgW, conceptImgH);
+
+  // ── 5. PROMPT TEXT ────────────────────────────────────────────────
+  if (prompt) {
+    c.setColor(COL_GRAY.r, COL_GRAY.g, COL_GRAY.b);
+    c.bold(MX, conceptBoxY - 18, 'Prompt:', 9);
+    const promptLines = wrapText(prompt, 90);
+    for (let i = 0; i < Math.min(promptLines.length, 3); i++) {
+      c.norm(MX + 4, conceptBoxY - 32 - i * 12, trunc(promptLines[i], 90), 8);
+    }
+  }
+
+  // ── 6. FOOTER BAR ─────────────────────────────────────────────────
+  c.rectFill(0, FOOTER_Y - 4, PW, FOOTER_BAR_H, COL_BEIGE.r, COL_BEIGE.g, COL_BEIGE.b);
+  c.setColor(COL_WHITE.r, COL_WHITE.g, COL_WHITE.b);
+  c.bold(MX + 8, FOOTER_Y + 4, 'MOBI', 9);
+  c.norm(MX + 50, FOOTER_Y + 4, 'AI Concept Sketch', 7);
 
   return c.build();
 }
@@ -664,6 +718,8 @@ interface PageObjSet {
   objects: PdfObj[];
   pageId: number;
   xobjectNames: string[];
+  _contentId: number;
+  _xoDict: string;
 }
 
 async function buildPageObjectSet(
@@ -678,27 +734,32 @@ async function buildPageObjectSet(
   // Resolve SVG views
   const views = resolveSvgViews(data, svgViews);
 
-  // Convert SVG views to JPEG images (larger resolution for portrait layout)
-  const frontalImg = await processView(views.frontal, 'Im1', 520);
-  const lateralImg = await processView(views.lateral, 'Im2', 520);
-  const plantImg = await processView(views.plant, 'Im3', 520);
+  // Convert SVG views to JPEG images (higher resolution for new layout)
+  const frontalImg = await processView(views.frontal, 'Im1', 1050);
+  const lateralImg = await processView(views.lateral, 'Im2', 800);
+  const plantImg = await processView(views.plant, 'Im3', 800);
 
-  // Process product photo
+  // Process product photo with background removal
   let photoImg: ProcessedImage | null = null;
   if (productImageBase64) {
     try {
       const sharp = (await import('sharp')).default;
       const inputBuf = Buffer.from(productImageBase64, 'base64');
-      const resizedBuf = await sharp(inputBuf)
-        .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+
+      // Try background removal
+      const bgRemovedBuf = await removeBackground(inputBuf);
+      const processedBuf = bgRemovedBuf || inputBuf;
+
+      const resizedBuf = await sharp(processedBuf)
+        .resize(600, 600, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 90 })
         .toBuffer();
       const meta = await sharp(resizedBuf).metadata();
       photoImg = {
         name: 'Im0',
         buffer: resizedBuf,
-        width: meta.width ?? 400,
-        height: meta.height ?? 400,
+        width: meta.width ?? 600,
+        height: meta.height ?? 600,
       };
     } catch {
       // Photo processing failed, skip
@@ -709,6 +770,16 @@ async function buildPageObjectSet(
   const hasFrontal = !!frontalImg;
   const hasLateral = !!lateralImg;
   const hasPlant = !!plantImg;
+
+  // Image dimensions for fitImage
+  const imgDims: ImageDimensions = {
+    frontalImgW: frontalImg?.width ?? 515,
+    frontalImgH: frontalImg?.height ?? 400,
+    lateralImgW: lateralImg?.width ?? 400,
+    lateralImgH: lateralImg?.height ?? 300,
+    plantImgW: plantImg?.width ?? 400,
+    plantImgH: plantImg?.height ?? 300,
+  };
 
   // Assign IDs
   const pageId = idGen();
@@ -721,7 +792,7 @@ async function buildPageObjectSet(
   if (plantImg) imgIds.push({ name: 'Im3', objId: idGen() });
 
   // Build content stream
-  const streamData = buildPageContent(data, unitSystem, hasPhoto, hasFrontal, hasLateral, hasPlant);
+  const streamData = buildPageContent(data, unitSystem, hasPhoto, hasFrontal, hasLateral, hasPlant, imgDims);
 
   // XObject dict fragment
   const xoEntries = imgIds.map(i => `/${i.name} ${i.objId} 0 R`).join(' ');
@@ -731,53 +802,98 @@ async function buildPageObjectSet(
   objects.push({ id: contentId, data: streamObj('', streamData) });
 
   // Image XObjects
-  if (photoImg) {
+  const addImageObj = (img: ProcessedImage) => {
     objects.push({
-      id: imgIds.find(i => i.name === 'Im0')!.objId,
+      id: imgIds.find(i => i.name === img.name)!.objId,
       data: streamObj(
-        `/Type /XObject /Subtype /Image /Width ${photoImg.width} /Height ${photoImg.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
-        photoImg.buffer,
+        `/Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
+        img.buffer,
       ),
     });
-  }
-  if (frontalImg) {
-    objects.push({
-      id: imgIds.find(i => i.name === 'Im1')!.objId,
-      data: streamObj(
-        `/Type /XObject /Subtype /Image /Width ${frontalImg.width} /Height ${frontalImg.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
-        frontalImg.buffer,
-      ),
-    });
-  }
-  if (lateralImg) {
-    objects.push({
-      id: imgIds.find(i => i.name === 'Im2')!.objId,
-      data: streamObj(
-        `/Type /XObject /Subtype /Image /Width ${lateralImg.width} /Height ${lateralImg.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
-        lateralImg.buffer,
-      ),
-    });
-  }
-  if (plantImg) {
-    objects.push({
-      id: imgIds.find(i => i.name === 'Im3')!.objId,
-      data: streamObj(
-        `/Type /XObject /Subtype /Image /Width ${plantImg.width} /Height ${plantImg.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
-        plantImg.buffer,
-      ),
-    });
-  }
+  };
 
-  const result: PageObjSet = {
+  if (photoImg) addImageObj(photoImg);
+  if (frontalImg) addImageObj(frontalImg);
+  if (lateralImg) addImageObj(lateralImg);
+  if (plantImg) addImageObj(plantImg);
+
+  return {
     objects,
     pageId,
     xobjectNames: imgIds.map(i => i.name),
+    _contentId: contentId,
+    _xoDict: xoDict,
   };
+}
 
-  (result as unknown as Record<string, unknown>)._contentId = contentId;
-  (result as unknown as Record<string, unknown>)._xoDict = xoDict;
+// Build concept page object set
+async function buildConceptPageObjectSet(
+  data: FurnitureData,
+  conceptImageBase64: string,
+  prompt: string | undefined,
+  idGen: () => number,
+): Promise<PageObjSet> {
+  const objects: PdfObj[] = [];
 
-  return result;
+  // Process concept image
+  let conceptImg: ProcessedImage | null = null;
+  try {
+    const sharp = (await import('sharp')).default;
+    const inputBuf = Buffer.from(conceptImageBase64, 'base64');
+    const resizedBuf = await sharp(inputBuf)
+      .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 92 })
+      .toBuffer();
+    const meta = await sharp(resizedBuf).metadata();
+    conceptImg = {
+      name: 'ImC',
+      buffer: resizedBuf,
+      width: meta.width ?? 800,
+      height: meta.height ?? 800,
+    };
+  } catch {
+    // Concept image processing failed
+  }
+
+  const conceptImgW = conceptImg?.width ?? 800;
+  const conceptImgH = conceptImg?.height ?? 800;
+
+  // Assign IDs
+  const pageId = idGen();
+  const contentId = idGen();
+  const conceptImgId = idGen();
+
+  const imgIds: { name: string; objId: number }[] = [];
+  if (conceptImg) imgIds.push({ name: 'ImC', objId: conceptImgId });
+
+  // Build content stream
+  const streamData = buildConceptPageContent(data, conceptImgW, conceptImgH, prompt);
+
+  // XObject dict fragment
+  const xoEntries = imgIds.map(i => `/${i.name} ${i.objId} 0 R`).join(' ');
+  const xoDict = xoEntries ? ` /XObject << ${xoEntries} >>` : '';
+
+  // Content stream object
+  objects.push({ id: contentId, data: streamObj('', streamData) });
+
+  // Image XObject
+  if (conceptImg) {
+    objects.push({
+      id: conceptImgId,
+      data: streamObj(
+        `/Type /XObject /Subtype /Image /Width ${conceptImg.width} /Height ${conceptImg.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
+        conceptImg.buffer,
+      ),
+    });
+  }
+
+  return {
+    objects,
+    pageId,
+    xobjectNames: imgIds.map(i => i.name),
+    _contentId: contentId,
+    _xoDict: xoDict,
+  };
 }
 
 // ============================================================================
@@ -790,6 +906,8 @@ export async function generateSinglePDF(
   imageBuffer?: Buffer | null,
   _technicalDrawingBuffer?: Buffer | null,
   svgViews?: SvgViews | null,
+  conceptImageBase64?: string | null,
+  conceptPrompt?: string | null,
 ): Promise<Buffer> {
   let nextId = 1;
   const id = () => nextId++;
@@ -803,29 +921,56 @@ export async function generateSinglePDF(
     productImageBase64 = imageBuffer.toString('base64');
   }
 
-  const pageSet = await buildPageObjectSet(furnitureData, unitSystem, svgViews, productImageBase64, id);
+  // Build concept page if concept image is provided
+  let conceptPageSet: PageObjSet | null = null;
+  if (conceptImageBase64) {
+    conceptPageSet = await buildConceptPageObjectSet(furnitureData, conceptImageBase64, conceptPrompt ?? undefined, id);
+  }
+
+  // Build spec page
+  const specPageSet = await buildPageObjectSet(furnitureData, unitSystem, svgViews, productImageBase64, id);
 
   const font1Id = id();
   const font2Id = id();
 
-  const contentId = (pageSet as unknown as Record<string, unknown>)._contentId as number;
-  const xoDict = (pageSet as unknown as Record<string, unknown>)._xoDict as string;
+  // Collect all page IDs
+  const pageIds: number[] = [];
+  if (conceptPageSet) pageIds.push(conceptPageSet.pageId);
+  pageIds.push(specPageSet.pageId);
 
   const allObjects: PdfObj[] = [
     { id: catalogId, data: dictObj(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`) },
-    { id: pagesId, data: dictObj(`<< /Type /Pages /Kids [${pageSet.pageId} 0 R] /Count 1 >>`) },
-    {
-      id: pageSet.pageId,
+    { id: pagesId, data: dictObj(`<< /Type /Pages /Kids [${pageIds.map(pid => `${pid} 0 R`).join(' ')}] /Count ${pageIds.length} >>`) },
+  ];
+
+  // Add concept page if present
+  if (conceptPageSet) {
+    allObjects.push({
+      id: conceptPageSet.pageId,
       data: dictObj(
         `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PW} ${PH}] ` +
-        `/Contents ${contentId} 0 R ` +
-        `/Resources << /Font << /F1 ${font1Id} 0 R /F2 ${font2Id} 0 R >>${xoDict} >> >>`,
+        `/Contents ${conceptPageSet._contentId} 0 R ` +
+        `/Resources << /Font << /F1 ${font1Id} 0 R /F2 ${font2Id} 0 R >>${conceptPageSet._xoDict} >> >>`,
       ),
-    },
-    ...pageSet.objects,
+    });
+    allObjects.push(...conceptPageSet.objects);
+  }
+
+  // Add spec page
+  allObjects.push({
+    id: specPageSet.pageId,
+    data: dictObj(
+      `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PW} ${PH}] ` +
+      `/Contents ${specPageSet._contentId} 0 R ` +
+      `/Resources << /Font << /F1 ${font1Id} 0 R /F2 ${font2Id} 0 R >>${specPageSet._xoDict} >> >>`,
+    ),
+  });
+  allObjects.push(...specPageSet.objects);
+
+  allObjects.push(
     { id: font1Id, data: dictObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>') },
     { id: font2Id, data: dictObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>') },
-  ];
+  );
 
   return assemblePDF(allObjects);
 }
@@ -839,8 +984,10 @@ export async function generateCombinedPDF(
   imageBuffer?: Buffer | null,
   _technicalDrawingBuffer?: Buffer | null,
   svgViews?: SvgViews | null,
+  conceptImageBase64?: string | null,
+  conceptPrompt?: string | null,
 ): Promise<Buffer> {
-  return generateSinglePDF(furnitureData, 'metric', imageBuffer, _technicalDrawingBuffer, svgViews);
+  return generateSinglePDF(furnitureData, 'metric', imageBuffer, _technicalDrawingBuffer, svgViews, conceptImageBase64, conceptPrompt);
 }
 
 // ============================================================================
@@ -889,15 +1036,12 @@ export async function generateCatalogPDF(
   ];
 
   for (const ps of pageSets) {
-    const contentId = (ps as unknown as Record<string, unknown>)._contentId as number;
-    const xoDict = (ps as unknown as Record<string, unknown>)._xoDict as string;
-
     allObjects.push({
       id: ps.pageId,
       data: dictObj(
         `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PW} ${PH}] ` +
-        `/Contents ${contentId} 0 R ` +
-        `/Resources << /Font << /F1 ${font1Id} 0 R /F2 ${font2Id} 0 R >>${xoDict} >> >>`,
+        `/Contents ${ps._contentId} 0 R ` +
+        `/Resources << /Font << /F1 ${font1Id} 0 R /F2 ${font2Id} 0 R >>${ps._xoDict} >> >>`,
       ),
     });
     allObjects.push(...ps.objects);

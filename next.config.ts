@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  serverExternalPackages: ['@resvg/resvg-js', 'sharp'],
+  serverExternalPackages: ['@resvg/resvg-js', 'sharp', '@imgly/background-removal'],
 };
 
 export default nextConfig;
