@@ -10,6 +10,7 @@ import { usePdfGeneration } from '@/hooks/use-pdf-generation';
 import { useCatalog } from '@/hooks/use-catalog';
 import { useDimensions } from '@/hooks/use-dimensions';
 import { useCopilot } from '@/hooks/use-copilot';
+import { useFicha } from '@/hooks/use-ficha';
 import { AppHeader } from '@/components/layout/AppHeader';
 import { UploadZone } from '@/components/upload/UploadZone';
 import { FeatureCards } from '@/components/upload/FeatureCards';
@@ -22,7 +23,9 @@ import { HeroSection } from '@/components/showcase/HeroSection';
 import { SampleShowcase } from '@/components/showcase/SampleShowcase';
 import { HowItWorks } from '@/components/showcase/HowItWorks';
 import { CopilotPanel } from '@/components/copilot/CopilotPanel';
-import { CheckCircle2, FileText, Plus, RotateCcw, Layers, Loader2 } from 'lucide-react';
+import { FichaEditingView } from '@/components/ficha/FichaEditingView';
+import { FichaReviewView } from '@/components/ficha/FichaReviewView';
+import { CheckCircle2, FileText, Plus, RotateCcw, Layers, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { FurnitureData } from '@/lib/types';
@@ -63,6 +66,7 @@ export default function Home() {
   const { handleAddToCatalog, handleClearCatalog, catalogCount } = useCatalog();
   const { renderDimensionInput } = useDimensions();
   const { copilotOpen, toggleCopilot } = useCopilot();
+  const { analyzeFicha } = useFicha();
 
   // Ref for scrolling to upload section
   const uploadRef = useRef<HTMLDivElement>(null);
@@ -156,7 +160,7 @@ export default function Home() {
                 onDrop={handleDrop}
                 onFileSelect={handleFile}
                 onRemoveImage={removeImage}
-                onAnalyze={handleAnalyze}
+                onAnalyze={analyzeFicha}
                 lang={lang}
               />
               <FeatureCards lang={lang} />
@@ -325,40 +329,94 @@ export default function Home() {
   }
 
   // STATE: Complete
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex flex-col">
-      <AppHeader
-        lang={lang}
-        onToggleLang={toggleLang}
-        title={t(lang, 'complete.pdfsGenerated')}
-        subtitle={t(lang, 'complete.sheetsReady')}
-        variant="success"
-        onToggleCopilot={toggleCopilot}
-        copilotOpen={copilotOpen}
-        actions={
-          <>
-            <Button variant="outline" size="sm" onClick={resetAll} className="text-stone-600">
-              <RotateCcw className="w-4 h-4 mr-1" />
-              {t(lang, 'editing.startOver')}
-            </Button>
-          </>
-        }
-      />
-      <CompleteView
-        metricPdf={metricPdf}
-        imperialPdf={imperialPdf}
-        combinedPdf={combinedPdf}
-        catalogPdf={catalogPdf}
-        furnitureData={furnitureData}
-        svgViews={svgViews}
-        catalogCount={catalogItems.length}
-        onDownload={downloadPdf}
-        onPreview={previewPdf}
-        onEditSpecs={() => useAppStore.getState().setState('editing')}
-        onNewAnalysis={resetAll}
-        lang={lang}
-      />
-      <CopilotPanel />
-    </div>
-  );
+  if (appState === 'complete') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex flex-col">
+        <AppHeader
+          lang={lang}
+          onToggleLang={toggleLang}
+          title={t(lang, 'complete.pdfsGenerated')}
+          subtitle={t(lang, 'complete.sheetsReady')}
+          variant="success"
+          onToggleCopilot={toggleCopilot}
+          copilotOpen={copilotOpen}
+          actions={
+            <>
+              <Button variant="outline" size="sm" onClick={resetAll} className="text-stone-600">
+                <RotateCcw className="w-4 h-4 mr-1" />
+                {t(lang, 'editing.startOver')}
+              </Button>
+            </>
+          }
+        />
+        <CompleteView
+          metricPdf={metricPdf}
+          imperialPdf={imperialPdf}
+          combinedPdf={combinedPdf}
+          catalogPdf={catalogPdf}
+          furnitureData={furnitureData}
+          svgViews={svgViews}
+          catalogCount={catalogItems.length}
+          onDownload={downloadPdf}
+          onPreview={previewPdf}
+          onEditSpecs={() => useAppStore.getState().setState('editing')}
+          onNewAnalysis={resetAll}
+          lang={lang}
+        />
+        <CopilotPanel />
+      </div>
+    );
+  }
+
+  // STATE: Ficha Editing
+  if (appState === 'ficha-editing') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex flex-col">
+        <AppHeader
+          lang={lang}
+          onToggleLang={toggleLang}
+          title={lang === 'en' ? 'Edit Product Sheet' : 'Editar Ficha de Producto'}
+          subtitle="VIVA MOBILI"
+          onToggleCopilot={toggleCopilot}
+          copilotOpen={copilotOpen}
+          actions={
+            <Badge className="bg-purple-100 text-purple-800 border-purple-200">
+              <Sparkles className="w-3 h-3 mr-1" />
+              VIVA MOBILI
+            </Badge>
+          }
+        />
+        <FichaEditingView lang={lang} />
+        <CopilotPanel />
+      </div>
+    );
+  }
+
+  // STATE: Ficha Review
+  if (appState === 'ficha-review') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex flex-col">
+        <AppHeader
+          lang={lang}
+          onToggleLang={toggleLang}
+          title={lang === 'en' ? 'Review & Export' : 'Revisar y Exportar'}
+          subtitle="VIVA MOBILI"
+          variant="success"
+          onToggleCopilot={toggleCopilot}
+          copilotOpen={copilotOpen}
+          actions={
+            <Badge className="bg-green-100 text-green-800 border-green-200">
+              <CheckCircle2 className="w-3 h-3 mr-1" />
+              VIVA MOBILI
+            </Badge>
+          }
+        />
+        <FichaReviewView lang={lang} />
+        <CopilotPanel />
+      </div>
+    );
+  }
+
+  // Fallback
+  return null;
 }

@@ -42,3 +42,26 @@ Stage Summary:
 - furnitureData JS object export shown in panel with full data structure
 - Bilingual support (EN/ES)
 - VIVA MOBILI branding throughout
+
+---
+Task ID: ficha-flow
+Agent: Main Agent
+Task: Implement editable ficha técnica flow for MOBI app
+
+Work Log:
+- Read existing codebase: store, types, hooks, API routes, components
+- Added new states 'ficha-editing' and 'ficha-review' to app-store.ts
+- Added fichaExportLoading and fichaExportFormat state to store
+- Created use-ficha.ts hook with analyzeFicha, goToReview, goBackToEdit, exportFicha, quickExport
+- Created FichaEditingView.tsx - full-screen editable ficha with dimensions, materials, colors, annotations
+- Created FichaReviewView.tsx - review screen with PDF preview and verification checklist
+- Updated page.tsx with new ficha-editing and ficha-review states
+- Changed upload flow to use analyzeFicha instead of handleAnalyze
+- Build successful with no errors
+
+Stage Summary:
+- New ficha flow: Upload → AI Analysis → Edit → Review → Export (SVG/PDF)
+- Full-screen editing experience (not sidebar)
+- Dimension editing highlighted as primary editable field
+- Review screen with verification checklist before export
+- Quick export buttons on editing screen for direct PDF/SVG export

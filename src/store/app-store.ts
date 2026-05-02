@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { FurnitureData, Lang, CopilotFurnitureData, CopilotMessage } from '@/lib/types';
 import { defaultFurnitureData, defaultCopilotFurnitureData } from '@/lib/types';
 
-type AppState = 'upload' | 'analyzing' | 'editing' | 'generating' | 'approving' | 'saving' | 'complete';
+type AppState = 'upload' | 'analyzing' | 'editing' | 'generating' | 'approving' | 'saving' | 'complete' | 'ficha-editing' | 'ficha-review';
 
 interface AppStore {
   // Core state
@@ -52,6 +52,12 @@ interface AppStore {
   copilotSheetPdf: string | null;
   copilotSheetSvg: string | null;
   fichaEditMode: boolean;
+  fichaAiImage: string | null; // AI-generated ficha image (base64)
+
+  // Ficha flow state
+  fichaExportLoading: boolean;
+  fichaExportFormat: 'pdf' | 'svg' | null;
+  fichaSvgPreview: string | null; // client-side live preview SVG
 
   // Actions
   setState: (state: AppState) => void;
@@ -86,6 +92,7 @@ interface AppStore {
   setCopilotSheetPdf: (pdf: string | null) => void;
   setCopilotSheetSvg: (svg: string | null) => void;
   setFichaEditMode: (mode: boolean) => void;
+  setFichaAiImage: (image: string | null) => void;
   clearCopilotMessages: () => void;
   updateCopilotData: (data: Partial<CopilotFurnitureData>) => void;
   updateCopilotDimension: (key: string, value: number | null) => void;
@@ -95,6 +102,9 @@ interface AppStore {
   addCopilotMaterialDetail: () => void;
   removeCopilotMaterialDetail: (index: number) => void;
   updateCopilotColor: (key: string, value: string) => void;
+  setFichaExportLoading: (loading: boolean) => void;
+  setFichaExportFormat: (format: 'pdf' | 'svg' | null) => void;
+  setFichaSvgPreview: (svg: string | null) => void;
   addCatalogItem: (item: FurnitureData, image: string) => void;
   clearCatalog: () => void;
   resetForNewPiece: () => void;
@@ -133,6 +143,10 @@ export const useAppStore = create<AppStore>()(
       copilotSheetPdf: null,
       copilotSheetSvg: null,
       fichaEditMode: false,
+      fichaAiImage: null,
+      fichaExportLoading: false,
+      fichaExportFormat: null,
+      fichaSvgPreview: null,
 
       setState: (state) => set({ appState: state }),
       setFurnitureData: (data) => set({ furnitureData: data }),
@@ -198,6 +212,7 @@ export const useAppStore = create<AppStore>()(
       setCopilotSheetPdf: (pdf) => set({ copilotSheetPdf: pdf }),
       setCopilotSheetSvg: (svg) => set({ copilotSheetSvg: svg }),
       setFichaEditMode: (mode) => set({ fichaEditMode: mode }),
+      setFichaAiImage: (image) => set({ fichaAiImage: image }),
       clearCopilotMessages: () => set({
         copilotMessages: [],
         copilotData: null,
@@ -205,6 +220,7 @@ export const useAppStore = create<AppStore>()(
         copilotSheetPdf: null,
         copilotSheetSvg: null,
         fichaEditMode: false,
+        fichaAiImage: null,
       }),
       updateCopilotData: (data) => set((s) => ({
         copilotData: s.copilotData ? { ...s.copilotData, ...data } : null,
@@ -267,6 +283,9 @@ export const useAppStore = create<AppStore>()(
           },
         };
       }),
+      setFichaExportLoading: (loading) => set({ fichaExportLoading: loading }),
+      setFichaExportFormat: (format) => set({ fichaExportFormat: format }),
+      setFichaSvgPreview: (svg) => set({ fichaSvgPreview: svg }),
       addCatalogItem: (item, image) => set((s) => ({
         catalogItems: [...s.catalogItems, item],
         catalogImages: [...s.catalogImages, image],
@@ -292,6 +311,10 @@ export const useAppStore = create<AppStore>()(
         copilotSheetPdf: null,
         copilotSheetSvg: null,
         fichaEditMode: false,
+        fichaAiImage: null,
+        fichaExportLoading: false,
+        fichaExportFormat: null,
+        fichaSvgPreview: null,
       }),
       resetAll: () => set({
         appState: 'upload',
@@ -316,6 +339,10 @@ export const useAppStore = create<AppStore>()(
         copilotSheetPdf: null,
         copilotSheetSvg: null,
         fichaEditMode: false,
+        fichaAiImage: null,
+        fichaExportLoading: false,
+        fichaExportFormat: null,
+        fichaSvgPreview: null,
       }),
     }),
     {
