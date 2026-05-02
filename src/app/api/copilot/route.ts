@@ -205,7 +205,45 @@ export async function POST(req: NextRequest) {
     base64 = compressed.base64;
     mimeType = compressed.mimeType;
 
-    // ── Provider 1: Microsoft Azure OpenAI (GPT-4o Vision) — PRIMARY ──
+    // ── Provider 1: Z-AI Vision (GLM-4V Plus) — PRIMARY ──
+    // Works immediately without any Azure configuration
+    const zaiConfigReady = await ensureZAIConfig();
+    if (zaiConfigReady) {
+      console.log(`[copilot] Trying Z-AI (GLM-4V Plus)...`);
+      try {
+        const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
+        const imageUrl = `data:${mimeType};base64,${base64}`;
+
+        const response = await withTimeout(
+          zai.chat.completions.create({
+            model: 'glm-4v-plus',
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'text', text: COPILOT_ANALYSIS_PROMPT },
+                { type: 'image_url', image_url: { url: imageUrl } },
+              ],
+            }],
+            stream: false,
+          }),
+          PROVIDER_TIMEOUT,
+          'Z-AI Vision'
+        );
+
+        const content = response.choices?.[0]?.message?.content || '';
+        if (content && content.length > 10) {
+          const parsed = parseAIResponse(content);
+          if ('parsed' in parsed) {
+            console.log(`[copilot] ✅ Z-AI analysis success, elapsed: ${Date.now() - startTime}ms`);
+            return NextResponse.json({ success: true, data: parsed.parsed, provider: 'Z-AI (GLM-4V Plus)' });
+          }
+        }
+      } catch (err) {
+        console.warn('[copilot] Z-AI failed:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // ── Provider 2: Microsoft Azure OpenAI (GPT-4o Vision) — OPTIONAL ──
     if (isAzureConfigured()) {
       console.log(`[copilot] Trying Microsoft Azure OpenAI (GPT-4o Vision)...`);
       try {
@@ -229,43 +267,6 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         console.warn('[copilot] Azure OpenAI failed:', err instanceof Error ? err.message : String(err));
-      }
-    }
-
-    // ── Provider 2: Z-AI Vision — FALLBACK ──
-    const zaiConfigReady = await ensureZAIConfig();
-    if (zaiConfigReady) {
-      console.log(`[copilot] Trying Z-AI provider...`);
-      try {
-        const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
-        const imageUrl = `data:${mimeType};base64,${base64}`;
-
-        const response = await withTimeout(
-          zai.chat.completions.createVision({
-            model: 'glm-4v-plus',
-            messages: [{
-              role: 'user',
-              content: [
-                { type: 'text', text: COPILOT_ANALYSIS_PROMPT },
-                { type: 'image_url', image_url: { url: imageUrl } },
-              ],
-            }],
-            stream: false,
-          }),
-          PROVIDER_TIMEOUT,
-          'Z-AI Vision'
-        );
-
-        const content = response.choices?.[0]?.message?.content || '';
-        if (content && content.length > 10) {
-          const parsed = parseAIResponse(content);
-          if ('parsed' in parsed) {
-            console.log(`[copilot] Z-AI analysis success, elapsed: ${Date.now() - startTime}ms`);
-            return NextResponse.json({ success: true, data: parsed.parsed, provider: 'Z-AI (GLM-4V Plus)' });
-          }
-        }
-      } catch (err) {
-        console.warn('[copilot] Z-AI failed:', err instanceof Error ? err.message : String(err));
       }
     }
 

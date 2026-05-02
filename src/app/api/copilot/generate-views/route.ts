@@ -106,11 +106,11 @@ export async function POST(req: NextRequest) {
     }
 
     const results: Record<string, string | null> = {};
-    const useAzure = isAzureConfigured();
     const useZai = await ensureZAIConfig();
+    const useAzure = isAzureConfigured();
 
-    if (!useAzure && !useZai) {
-      return NextResponse.json({ error: 'No AI image generation providers configured. Set AZURE_OPENAI_API_KEY or ZAI_BASE_URL.' }, { status: 503 });
+    if (!useZai && !useAzure) {
+      return NextResponse.json({ error: 'No AI image generation providers configured. Z-AI should work by default.' }, { status: 503 });
     }
 
     // Generate views sequentially to avoid rate limits
@@ -120,25 +120,9 @@ export async function POST(req: NextRequest) {
 
       let imageBase64: string | null = null;
 
-      // ── Provider 1: Azure OpenAI DALL-E 3 (PRIMARY) ──
-      if (useAzure) {
-        try {
-          const result = await withTimeout(
-            azureGenerateImage(prompt, '1024x1024', 'hd'),
-            60_000,
-            `Azure DALL-E 3 (${view})`
-          );
-          if (result.success && result.base64) {
-            imageBase64 = result.base64;
-            console.log(`[copilot-views] ✅ Azure DALL-E 3 generated ${view} view`);
-          }
-        } catch (err) {
-          console.warn(`[copilot-views] Azure DALL-E 3 failed for ${view}:`, err instanceof Error ? err.message : String(err));
-        }
-      }
-
-      // ── Provider 2: Z-AI Image Generation (FALLBACK) ──
-      if (!imageBase64 && useZai) {
+      // ── Provider 1: Z-AI Image Generation — PRIMARY ──
+      // Works immediately without any Azure configuration
+      if (useZai) {
         try {
           const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
           const response = await withTimeout(
@@ -151,10 +135,27 @@ export async function POST(req: NextRequest) {
           );
           imageBase64 = response.data?.[0]?.base64 || null;
           if (imageBase64) {
-            console.log(`[copilot-views] Z-AI generated ${view} view`);
+            console.log(`[copilot-views] ✅ Z-AI generated ${view} view`);
           }
         } catch (err) {
           console.warn(`[copilot-views] Z-AI image generation failed for ${view}:`, err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      // ── Provider 2: Azure OpenAI DALL-E 3 — OPTIONAL ──
+      if (!imageBase64 && useAzure) {
+        try {
+          const result = await withTimeout(
+            azureGenerateImage(prompt, '1024x1024', 'hd'),
+            60_000,
+            `Azure DALL-E 3 (${view})`
+          );
+          if (result.success && result.base64) {
+            imageBase64 = result.base64;
+            console.log(`[copilot-views] ✅ Azure DALL-E 3 generated ${view} view`);
+          }
+        } catch (err) {
+          console.warn(`[copilot-views] Azure DALL-E 3 failed for ${view}:`, err instanceof Error ? err.message : String(err));
         }
       }
 
