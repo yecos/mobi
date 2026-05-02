@@ -7,10 +7,13 @@ import os from 'os';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Timeouts tuned for Vercel serverless (hobby=10s, pro=60s)
-const PROVIDER_TIMEOUT = 20_000;   // 20s per provider attempt
-const MAX_RETRIES = 2;             // Max retries for 429
-const RETRY_BASE_MS = 2_000;       // 2s base delay (2s, 4s)
+// Timeouts tuned for Vercel serverless
+const PROVIDER_TIMEOUT = 25_000;
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 3_000;
+// Max image dimension for AI analysis (reduce payload to avoid rate limits)
+const MAX_IMAGE_DIM = 800;
+const JPEG_QUALITY = 75;
 
 /** Wrap a promise with a timeout */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -23,13 +26,58 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-/** Sleep for ms */
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 function isVercel(): boolean {
   return !!(process.env.VERCEL || process.env.VERCEL_URL);
+}
+
+/**
+ * Resize and compress image server-side using sharp.
+ * Reduces base64 size dramatically (often 10x), lowering rate-limit risk.
+ */
+async function compressImage(base64: string, mimeType: string): Promise<{ base64: string; mimeType: string }> {
+  try {
+    const sharp = (await import('sharp')).default;
+    const inputBuffer = Buffer.from(base64, 'base64');
+
+    const metadata = await sharp(inputBuffer).metadata();
+    const width = metadata.width || 800;
+    const height = metadata.height || 600;
+
+    // Only resize if larger than max dimension
+    if (width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM) {
+      const resizedBuffer = await sharp(inputBuffer)
+        .resize(MAX_IMAGE_DIM, MAX_IMAGE_DIM, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: JPEG_QUALITY })
+        .toBuffer();
+
+      console.log(`[analyze] Image compressed: ${width}x${height} → ${MAX_IMAGE_DIM}x, base64 ${base64.length} → ${resizedBuffer.toString('base64').length}`);
+      return {
+        base64: resizedBuffer.toString('base64'),
+        mimeType: 'image/jpeg',
+      };
+    }
+
+    // Already small enough, but convert to JPEG for consistency
+    if (mimeType !== 'image/jpeg') {
+      const convertedBuffer = await sharp(inputBuffer)
+        .jpeg({ quality: JPEG_QUALITY })
+        .toBuffer();
+      return {
+        base64: convertedBuffer.toString('base64'),
+        mimeType: 'image/jpeg',
+      };
+    }
+
+    return { base64, mimeType };
+  } catch (err) {
+    // If sharp fails, just use original image
+    console.warn('[analyze] Image compression failed, using original:', err instanceof Error ? err.message : String(err));
+    return { base64, mimeType };
+  }
 }
 
 const PROMPT_TEXT = `Analyze this furniture image. Return JSON ONLY (no markdown, no code blocks):
@@ -84,22 +132,13 @@ interface ProviderResult {
   provider?: string;
 }
 
-/**
- * Ensure Z-AI config is available. On Vercel, we rely on env vars;
- * locally we can also use the .z-ai-config file.
- */
 async function ensureZAIConfig(): Promise<boolean> {
-  // On Vercel: use env vars directly — don't try to write files
   if (isVercel()) {
     const baseUrl = process.env.ZAI_BASE_URL;
     const apiKey = process.env.ZAI_API_KEY;
-    if (!baseUrl || !apiKey) return false;
-    // Don't write to filesystem on Vercel (read-only)
-    // The SDK should pick up env vars directly
-    return true;
+    return !!(baseUrl && apiKey);
   }
 
-  // Local: try existing config files first
   const configPaths = [
     path.join(process.cwd(), '.z-ai-config'),
     path.join(os.homedir(), '.z-ai-config'),
@@ -110,15 +149,12 @@ async function ensureZAIConfig(): Promise<boolean> {
     try {
       const content = fs.readFileSync(p, 'utf-8');
       const config = JSON.parse(content);
-      if (config.baseUrl && config.apiKey) {
-        return true;
-      }
+      if (config.baseUrl && config.apiKey) return true;
     } catch {
       // File doesn't exist or invalid
     }
   }
 
-  // Try env vars and create config file for local dev
   const baseUrl = process.env.ZAI_BASE_URL;
   const apiKey = process.env.ZAI_API_KEY;
   if (!baseUrl || !apiKey) return false;
@@ -132,24 +168,23 @@ async function ensureZAIConfig(): Promise<boolean> {
       token: process.env.ZAI_TOKEN,
       userId: process.env.ZAI_USER_ID,
     }, null, 2));
-    return true;
-  } catch (err) {
-    // Even if write fails, env vars might be picked up by SDK
-    return true;
+  } catch {
+    // Write might fail but env vars exist
   }
+  return true;
 }
 
 async function tryZAI(base64: string, mimeType: string): Promise<ProviderResult> {
   try {
     const configReady = await ensureZAIConfig();
     if (!configReady) {
-      return { success: false, error: 'Z-AI config not available (missing env vars)' };
+      return { success: false, error: 'Z-AI config not available (missing ZAI_BASE_URL or ZAI_API_KEY env vars)' };
     }
 
-    const zai = await withTimeout(ZAI.create(), 10_000, 'Z-AI init');
+    const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
     const imageUrl = `data:${mimeType};base64,${base64}`;
 
-    // Try vision API first — this is the primary path
+    // Try vision API first
     try {
       const response = await withTimeout(
         zai.chat.completions.createVision({
@@ -174,22 +209,19 @@ async function tryZAI(base64: string, mimeType: string): Promise<ProviderResult>
     } catch (visionErr) {
       const msg = visionErr instanceof Error ? visionErr.message : String(visionErr);
       console.warn('[analyze] Z-AI vision failed:', msg);
-      // If it's a timeout, don't bother trying chat fallback (likely also slow)
       if (msg.includes('timed out')) {
         return { success: false, error: `Z-AI Vision: ${msg}` };
       }
     }
 
-    // Fallback: try regular chat API (if vision is not available)
+    // Fallback: try regular chat API (without image)
     try {
       const response = await withTimeout(
         zai.chat.completions.create({
-          messages: [
-            {
-              role: 'user',
-              content: PROMPT_TEXT + '\n\n[Note: Image could not be processed via vision API. Provide generic furniture estimates based on common dimensions.]',
-            },
-          ],
+          messages: [{
+            role: 'user',
+            content: PROMPT_TEXT + '\n\n[Note: Image could not be processed via vision API. Provide generic furniture estimates based on common dimensions for the most likely furniture type.]',
+          }],
           stream: false,
         }),
         PROVIDER_TIMEOUT,
@@ -240,14 +272,18 @@ async function tryGemini(base64: string, mimeType: string, retryCount = 0): Prom
 
     if (!response.ok) {
       if (response.status === 429 && retryCount < MAX_RETRIES) {
-        // Shorter backoff: 2s, 4s (total 6s instead of 50s)
         const delay = RETRY_BASE_MS * (retryCount + 1);
         console.warn(`[analyze] Gemini 429 rate limit, retrying in ${delay / 1000}s (attempt ${retryCount + 1}/${MAX_RETRIES})`);
         await sleep(delay);
         return tryGemini(base64, mimeType, retryCount + 1);
       }
       if (response.status === 429) {
-        return { success: false, error: 'Gemini rate limit exceeded. Please wait a moment and try again.' };
+        // Return the Retry-After header if available
+        const retryAfter = response.headers.get('Retry-After');
+        return {
+          success: false,
+          error: `Gemini rate limit exceeded.${retryAfter ? ` Retry after ${retryAfter}s.` : ' Please wait and try again.'}`,
+        };
       }
       const errorBody = await response.text().catch(() => '');
       console.error(`[analyze] Gemini ${response.status}:`, errorBody.substring(0, 200));
@@ -269,15 +305,177 @@ async function tryGemini(base64: string, mimeType: string, retryCount = 0): Prom
   }
 }
 
+/**
+ * Generate intelligent defaults based on furniture category.
+ * Used as a last-resort fallback when all AI providers fail,
+ * so the user can at least edit manually instead of being blocked.
+ */
+function generateSmartDefaults(category?: string): Record<string, unknown> {
+  const cat = (category || 'sofa').toLowerCase();
+
+  // Standard ergonomic dimensions per category
+  const defaultsByCategory: Record<string, Record<string, unknown>> = {
+    chair: {
+      productName: 'Chair',
+      category: 'chair',
+      dimensions: {
+        height: { feet: 2, inches: 10 },
+        width: { feet: 1, inches: 10 },
+        depth: { feet: 1, inches: 10 },
+        widthExtended: { feet: 0, inches: 0 },
+        seatDepth: { feet: 1, inches: 4 },
+        depthExtended: { feet: 0, inches: 0 },
+      },
+      shapeProfile: {
+        bodyShape: 'rectangular',
+        cornerStyle: 'slightly-rounded',
+        hasBackrest: true,
+        backrestShape: 'flat',
+        hasArmrests: false,
+        armrestShape: 'none',
+        legType: 'cylindrical',
+        legCount: 4,
+        seatShape: 'flat',
+        topViewOutline: 'Rectangular seat with slim backrest',
+        sideProfile: 'L-shaped with straight backrest',
+      },
+      materials: [{ material: 'Wood', quantity: 1, description: 'Frame structure', observations: '' }],
+      description: 'Standard chair with ergonomic proportions.',
+      descriptionEs: 'Silla estándar con proporciones ergonómicas.',
+    },
+    sofa: {
+      productName: 'Sofa',
+      category: 'sofa',
+      dimensions: {
+        height: { feet: 2, inches: 10 },
+        width: { feet: 6, inches: 0 },
+        depth: { feet: 2, inches: 6 },
+        widthExtended: { feet: 0, inches: 0 },
+        seatDepth: { feet: 1, inches: 10 },
+        depthExtended: { feet: 0, inches: 0 },
+      },
+      shapeProfile: {
+        bodyShape: 'rectangular',
+        cornerStyle: 'slightly-rounded',
+        hasBackrest: true,
+        backrestShape: 'cushioned',
+        hasArmrests: true,
+        armrestShape: 'straight',
+        legType: 'block',
+        legCount: 4,
+        seatShape: 'cushioned',
+        topViewOutline: 'Rectangular with cushioned seats and armrests',
+        sideProfile: 'L-shaped with padded backrest and seat cushion',
+      },
+      materials: [
+        { material: 'Fabric', quantity: 1, description: 'Upholstery', observations: '' },
+        { material: 'Foam', quantity: 1, description: 'Cushion filling', observations: '' },
+        { material: 'Wood', quantity: 1, description: 'Frame structure', observations: '' },
+      ],
+      description: 'Standard three-seater sofa with cushioned seats and armrests.',
+      descriptionEs: 'Sofá estándar de tres plazas con asientos acolchados y reposabrazos.',
+    },
+    table: {
+      productName: 'Table',
+      category: 'table',
+      dimensions: {
+        height: { feet: 2, inches: 6 },
+        width: { feet: 4, inches: 0 },
+        depth: { feet: 2, inches: 0 },
+        widthExtended: { feet: 0, inches: 0 },
+        seatDepth: { feet: 0, inches: 0 },
+        depthExtended: { feet: 0, inches: 0 },
+      },
+      shapeProfile: {
+        bodyShape: 'rectangular',
+        cornerStyle: 'slightly-rounded',
+        hasBackrest: false,
+        backrestShape: 'none',
+        hasArmrests: false,
+        armrestShape: 'none',
+        legType: 'tapered',
+        legCount: 4,
+        seatShape: 'flat',
+        topViewOutline: 'Rectangular top surface with four leg positions',
+        sideProfile: 'Flat top on tapered legs',
+      },
+      materials: [{ material: 'Wood', quantity: 1, description: 'Table top and legs', observations: '' }],
+      description: 'Standard dining table with rectangular top.',
+      descriptionEs: 'Mesa de comedor estándar con superficie rectangular.',
+    },
+    bed: {
+      productName: 'Bed',
+      category: 'bed',
+      dimensions: {
+        height: { feet: 3, inches: 0 },
+        width: { feet: 5, inches: 0 },
+        depth: { feet: 6, inches: 6 },
+        widthExtended: { feet: 0, inches: 0 },
+        seatDepth: { feet: 0, inches: 0 },
+        depthExtended: { feet: 0, inches: 0 },
+      },
+      shapeProfile: {
+        bodyShape: 'rectangular',
+        cornerStyle: 'sharp',
+        hasBackrest: false,
+        backrestShape: 'none',
+        hasArmrests: false,
+        armrestShape: 'none',
+        legType: 'block',
+        legCount: 4,
+        seatShape: 'flat',
+        topViewOutline: 'Rectangular mattress with headboard at one end',
+        sideProfile: 'Low frame with headboard extension',
+      },
+      materials: [
+        { material: 'Wood', quantity: 1, description: 'Bed frame', observations: '' },
+        { material: 'Fabric', quantity: 1, description: 'Headboard upholstery', observations: '' },
+      ],
+      description: 'Standard queen-size bed frame with headboard.',
+      descriptionEs: 'Cama tamaño queen estándar con cabecera.',
+    },
+  };
+
+  // Fallback for unknown categories
+  const fallback = {
+    productName: 'Furniture Piece',
+    category: cat,
+    dimensions: {
+      height: { feet: 2, inches: 6 },
+      width: { feet: 3, inches: 0 },
+      depth: { feet: 1, inches: 6 },
+      widthExtended: { feet: 0, inches: 0 },
+      seatDepth: { feet: 0, inches: 0 },
+      depthExtended: { feet: 0, inches: 0 },
+    },
+    shapeProfile: {
+      bodyShape: 'rectangular',
+      cornerStyle: 'sharp',
+      hasBackrest: false,
+      backrestShape: 'none',
+      hasArmrests: false,
+      armrestShape: 'none',
+      legType: 'block',
+      legCount: 4,
+      seatShape: 'flat',
+      topViewOutline: 'Rectangular shape',
+      sideProfile: 'Rectangular box profile',
+    },
+    materials: [],
+    description: 'Furniture piece — edit dimensions and details manually.',
+    descriptionEs: 'Pieza de mobiliario — edita dimensiones y detalles manualmente.',
+  };
+
+  return defaultsByCategory[cat] || fallback;
+}
+
 function parseAIResponse(content: string): { parsed: unknown } | { error: string } {
   let jsonStr = content.trim();
-  // Strip markdown code blocks
   if (jsonStr.includes('```json')) {
     jsonStr = jsonStr.split('```json')[1].split('```')[0].trim();
   } else if (jsonStr.includes('```')) {
     jsonStr = jsonStr.split('```')[1].split('```')[0].trim();
   }
-  // Strip leading "Here is..." text that some models add before JSON
   const firstBrace = jsonStr.indexOf('{');
   const firstBracket = jsonStr.indexOf('[');
   if (firstBrace > 0 || firstBracket > 0) {
@@ -292,7 +490,7 @@ function parseAIResponse(content: string): { parsed: unknown } | { error: string
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     return { parsed };
-  } catch (e) {
+  } catch {
     console.error('[analyze] JSON parse failed. Raw (first 500 chars):', content.substring(0, 500));
     return { error: 'Failed to parse furniture data from AI response' };
   }
@@ -302,7 +500,6 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // Accept both JSON body and FormData
     let base64: string;
     let mimeType: string;
 
@@ -311,24 +508,18 @@ export async function POST(req: NextRequest) {
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
       const imageFile = formData.get('image') as File;
-
       if (!imageFile) {
         return NextResponse.json({ error: 'No image provided' }, { status: 400 });
       }
-
       const bytes = await imageFile.arrayBuffer();
       base64 = Buffer.from(bytes).toString('base64');
       mimeType = imageFile.type;
     } else {
-      // JSON body: { image: base64string }
       const body = await req.json();
       const image = body.image as string;
-
       if (!image) {
         return NextResponse.json({ error: 'No image provided' }, { status: 400 });
       }
-
-      // Handle data URL format
       if (image.startsWith('data:')) {
         const matches = image.match(/^data:image\/(\w+);base64,(.+)$/);
         if (matches) {
@@ -345,8 +536,14 @@ export async function POST(req: NextRequest) {
 
     console.log(`[analyze] Image received, base64 length: ${base64.length}, elapsed: ${Date.now() - startTime}ms`);
 
-    // Build provider list — try sequentially (Z-AI first, then Gemini)
-    // Sequential is more reliable than racing on serverless with limited time
+    // Compress image server-side to reduce payload for AI providers
+    const compressed = await compressImage(base64, mimeType);
+    base64 = compressed.base64;
+    mimeType = compressed.mimeType;
+
+    console.log(`[analyze] After compression, base64 length: ${base64.length}, elapsed: ${Date.now() - startTime}ms`);
+
+    // Try providers sequentially
     const results: ProviderResult[] = [];
 
     // Provider 1: Z-AI (primary)
@@ -362,8 +559,7 @@ export async function POST(req: NextRequest) {
         if ('parsed' in parsed) {
           return NextResponse.json({ success: true, data: parsed.parsed, provider: zaiResult.provider });
         }
-        // Parse failed, try next provider
-        console.warn('[analyze] Z-AI response parsed failed, trying fallback...');
+        console.warn('[analyze] Z-AI response parse failed, trying fallback...');
       }
     }
 
@@ -382,48 +578,53 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // All providers failed
+    // All providers failed — return smart defaults with a flag so the client knows
     const allErrors = results.map((r) => r.error || 'Unknown error').join('; ');
-    const hasRateLimit = allErrors.includes('429') || allErrors.includes('rate limit');
+    const hasRateLimit = allErrors.includes('429') || allErrors.toLowerCase().includes('rate limit');
     const hasTimeout = allErrors.includes('timed out') || allErrors.includes('TimeoutError');
 
-    console.error(`[analyze] All providers failed. Errors: ${allErrors}. Total time: ${Date.now() - startTime}ms`);
+    console.warn(`[analyze] All providers failed. Returning smart defaults. Errors: ${allErrors}. Total time: ${Date.now() - startTime}ms`);
 
     if (results.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'No AI providers configured. Set ZAI_BASE_URL + ZAI_API_KEY or GEMINI_API_KEY env vars.',
-          code: 'NO_PROVIDERS',
-        },
-        { status: 500 }
-      );
+      // No providers configured at all — return defaults with clear warning
+      const defaults = generateSmartDefaults('sofa');
+      return NextResponse.json({
+        success: true,
+        data: defaults,
+        provider: 'Smart Defaults (no AI providers configured)',
+        isEstimated: true,
+        warning: 'No AI providers are configured. Showing estimated dimensions — please edit manually.',
+      });
     }
 
-    return NextResponse.json(
-      {
-        success: false,
-        error: hasRateLimit
-          ? 'AI service rate limit reached. Please wait 30 seconds and try again.'
-          : hasTimeout
-            ? 'AI analysis timed out. The servers may be busy — please try again in a moment.'
-            : 'AI analysis failed. Please try again.',
-        details: allErrors,
-        code: hasRateLimit ? 'RATE_LIMITED' : hasTimeout ? 'TIMEOUT' : 'PROVIDER_ERROR',
-      },
-      { status: hasRateLimit ? 429 : 502 }
-    );
+    // Return smart defaults + error info so user can still edit
+    const defaults = generateSmartDefaults('sofa');
+    return NextResponse.json({
+      success: true,
+      data: defaults,
+      provider: hasRateLimit ? 'Smart Defaults (AI rate limited)' : hasTimeout ? 'Smart Defaults (AI timed out)' : 'Smart Defaults (AI unavailable)',
+      isEstimated: true,
+      warning: hasRateLimit
+        ? 'AI service is currently busy. Showing estimated dimensions — please verify and edit manually, or retry in 30 seconds.'
+        : hasTimeout
+          ? 'AI analysis timed out. Showing estimated dimensions — please verify and edit manually, or retry in a moment.'
+          : 'AI analysis failed. Showing estimated dimensions — please edit manually.',
+      retryable: true,
+      originalError: allErrors,
+    });
   } catch (error) {
     console.error('[analyze] Unexpected error:', error);
     const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'Failed to analyze image. Please try again.',
-        details: msg,
-        code: 'INTERNAL_ERROR',
-      },
-      { status: 500 }
-    );
+
+    // Even on unexpected error, return defaults so user isn't blocked
+    const defaults = generateSmartDefaults('sofa');
+    return NextResponse.json({
+      success: true,
+      data: defaults,
+      provider: 'Smart Defaults (error)',
+      isEstimated: true,
+      warning: 'An unexpected error occurred. Showing estimated dimensions — please edit manually.',
+      originalError: msg,
+    });
   }
 }
