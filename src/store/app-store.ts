@@ -50,6 +50,8 @@ interface AppStore {
   copilotData: CopilotFurnitureData | null;
   copilotViewImages: Record<string, string | null>;
   copilotSheetPdf: string | null;
+  copilotSheetSvg: string | null;
+  fichaEditMode: boolean;
 
   // Actions
   setState: (state: AppState) => void;
@@ -76,6 +78,23 @@ interface AppStore {
   setApproved: (approved: boolean) => void;
   setConceptImage: (base64: string | null) => void;
   setConceptPrompt: (prompt: string | null) => void;
+  setCopilotOpen: (open: boolean) => void;
+  setCopilotLoading: (loading: boolean) => void;
+  addCopilotMessage: (msg: CopilotMessage) => void;
+  setCopilotData: (data: CopilotFurnitureData | null) => void;
+  setCopilotViewImages: (images: Record<string, string | null>) => void;
+  setCopilotSheetPdf: (pdf: string | null) => void;
+  setCopilotSheetSvg: (svg: string | null) => void;
+  setFichaEditMode: (mode: boolean) => void;
+  clearCopilotMessages: () => void;
+  updateCopilotData: (data: Partial<CopilotFurnitureData>) => void;
+  updateCopilotDimension: (key: string, value: number | null) => void;
+  updateCopilotMaterial: (data: Partial<CopilotFurnitureData['material']>) => void;
+  updateCopilotAnnotation: (index: number, value: string) => void;
+  updateCopilotMaterialDetail: (index: number, value: string) => void;
+  addCopilotMaterialDetail: () => void;
+  removeCopilotMaterialDetail: (index: number) => void;
+  updateCopilotColor: (key: string, value: string) => void;
   addCatalogItem: (item: FurnitureData, image: string) => void;
   clearCatalog: () => void;
   resetForNewPiece: () => void;
@@ -112,6 +131,8 @@ export const useAppStore = create<AppStore>()(
       copilotData: null,
       copilotViewImages: { front: null, side: null, top: null, perspective: null },
       copilotSheetPdf: null,
+      copilotSheetSvg: null,
+      fichaEditMode: false,
 
       setState: (state) => set({ appState: state }),
       setFurnitureData: (data) => set({ furnitureData: data }),
@@ -175,7 +196,77 @@ export const useAppStore = create<AppStore>()(
       setCopilotData: (data) => set({ copilotData: data }),
       setCopilotViewImages: (images) => set({ copilotViewImages: images }),
       setCopilotSheetPdf: (pdf) => set({ copilotSheetPdf: pdf }),
-      clearCopilotMessages: () => set({ copilotMessages: [], copilotData: null, copilotViewImages: { front: null, side: null, top: null, perspective: null }, copilotSheetPdf: null }),
+      setCopilotSheetSvg: (svg) => set({ copilotSheetSvg: svg }),
+      setFichaEditMode: (mode) => set({ fichaEditMode: mode }),
+      clearCopilotMessages: () => set({
+        copilotMessages: [],
+        copilotData: null,
+        copilotViewImages: { front: null, side: null, top: null, perspective: null },
+        copilotSheetPdf: null,
+        copilotSheetSvg: null,
+        fichaEditMode: false,
+      }),
+      updateCopilotData: (data) => set((s) => ({
+        copilotData: s.copilotData ? { ...s.copilotData, ...data } : null,
+      })),
+      updateCopilotDimension: (key, value) => set((s) => {
+        if (!s.copilotData) return {};
+        return {
+          copilotData: {
+            ...s.copilotData,
+            dimensions: { ...s.copilotData.dimensions, [key]: value },
+          },
+        };
+      }),
+      updateCopilotMaterial: (data) => set((s) => {
+        if (!s.copilotData) return {};
+        return {
+          copilotData: {
+            ...s.copilotData,
+            material: { ...s.copilotData.material, ...data },
+          },
+        };
+      }),
+      updateCopilotAnnotation: (index, value) => set((s) => {
+        if (!s.copilotData) return {};
+        const newAnnotations = [...s.copilotData.annotations];
+        newAnnotations[index] = value;
+        return { copilotData: { ...s.copilotData, annotations: newAnnotations } };
+      }),
+      updateCopilotMaterialDetail: (index, value) => set((s) => {
+        if (!s.copilotData) return {};
+        const newDetails = [...s.copilotData.material.details];
+        newDetails[index] = value;
+        return { copilotData: { ...s.copilotData, material: { ...s.copilotData.material, details: newDetails } } };
+      }),
+      addCopilotMaterialDetail: () => set((s) => {
+        if (!s.copilotData) return {};
+        return {
+          copilotData: {
+            ...s.copilotData,
+            material: { ...s.copilotData.material, details: [...s.copilotData.material.details, ''] },
+          },
+        };
+      }),
+      removeCopilotMaterialDetail: (index) => set((s) => {
+        if (!s.copilotData) return {};
+        const newDetails = s.copilotData.material.details.filter((_, i) => i !== index);
+        return {
+          copilotData: {
+            ...s.copilotData,
+            material: { ...s.copilotData.material, details: newDetails },
+          },
+        };
+      }),
+      updateCopilotColor: (key, value) => set((s) => {
+        if (!s.copilotData) return {};
+        return {
+          copilotData: {
+            ...s.copilotData,
+            colorPalette: { ...s.copilotData.colorPalette, [key]: value },
+          },
+        };
+      }),
       addCatalogItem: (item, image) => set((s) => ({
         catalogItems: [...s.catalogItems, item],
         catalogImages: [...s.catalogImages, image],
@@ -199,6 +290,8 @@ export const useAppStore = create<AppStore>()(
         copilotData: null,
         copilotViewImages: { front: null, side: null, top: null, perspective: null },
         copilotSheetPdf: null,
+        copilotSheetSvg: null,
+        fichaEditMode: false,
       }),
       resetAll: () => set({
         appState: 'upload',
@@ -221,6 +314,8 @@ export const useAppStore = create<AppStore>()(
         copilotData: null,
         copilotViewImages: { front: null, side: null, top: null, perspective: null },
         copilotSheetPdf: null,
+        copilotSheetSvg: null,
+        fichaEditMode: false,
       }),
     }),
     {

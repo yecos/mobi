@@ -89,38 +89,56 @@ async function ensureZAIConfig(): Promise<boolean> {
   return true;
 }
 
-const COPILOT_ANALYSIS_PROMPT = `Analyze this furniture image carefully and extract the following information. Return JSON ONLY (no markdown, no code blocks):
+const COPILOT_ANALYSIS_PROMPT = `Analyze the uploaded furniture image and automatically identify:
+
+- Product type (chair, stool, table, sofa, etc.)
+- Style (modern, minimalist, luxury, industrial, etc.)
+- Main material (wood, metal, fabric, etc.)
+- Finish/color (natural, matte, polished, etc.)
+- Distinctive feature (woven cane, modularity, storage, etc.)
+
+Then generate a realistic technical product sheet. Return JSON ONLY (no markdown, no code blocks):
 
 {
   "productType": "<chair|stool|table|sofa|bed|desk|cabinet|shelving|bench|ottoman>",
   "style": "<modern|minimalist|luxury|industrial|scandinavian|mid-century|rustic|transitional|contemporary|art-deco>",
   "material": {
     "main": "<wood|metal|fabric|leather|glass|stone|rattan|bamboo|plastic|composite>",
-    "details": ["<specific material detail 1>", "<specific material detail 2>", "<specific material detail 3>"]
+    "details": ["<specific material detail about frame/structure>", "<specific material detail about surface/upholstery>", "<specific material detail about finish/joinery>", "<specific material detail about hardware/accessories>"]
   },
   "finish": "<natural|matte|polished|lacquered|oiled|waxed|brushed|powder-coated|upholstered|stained>",
   "feature": "<woven cane|modularity|storage|reclining|extendable|foldable|stackable|convertible|built-in lighting|adjustable height|any distinctive feature>",
   "dimensions": {
-    "height": <height_in_cm_as_number>,
+    "height": <total_height_in_cm_as_number>,
     "width": <width_in_cm_as_number>,
     "depth": <depth_in_cm_as_number>,
     "seatHeight": <seat_height_in_cm_as_number_or_null_if_not_applicable>
   },
   "weight": <weight_in_kg_as_number>,
   "annotations": [
-    "<annotation describing material highlight, e.g. 'Solid oak frame with visible grain pattern'>",
-    "<annotation describing joinery/construction, e.g. 'Mortise and tenon joints at frame connections'>",
-    "<annotation describing texture/functional detail, e.g. 'Hand-woven cane panel with natural finish'>"
+    "<annotation pointing to material highlight with texture description, e.g. 'Solid oak frame with visible grain pattern'>",
+    "<annotation pointing to joinery/construction technique, e.g. 'Mortise and tenon joints at frame connections'>",
+    "<annotation pointing to functional/highlight detail, e.g. 'Hand-woven cane panel with natural finish'>"
   ],
   "colorPalette": {
-    "primary": "<hex color of main material>",
-    "secondary": "<hex color of accent/feature>",
+    "primary": "<hex color of main material extracted directly from image>",
+    "secondary": "<hex color of accent/feature extracted directly from image>",
     "pearlGray": "#E5E5E5",
     "darkGray": "#4A4A4A"
   },
   "brand": "VIVA MOBILI",
   "renderViews": ["front", "side", "top", "perspective"]
 }
+
+The product sheet should envision:
+- Four views: front, side, top, and elevated 3/4 perspective, rendered photorealistically on a pearl gray background.
+- Dimension lines (in centimeters) for height, width, depth, and seat height (if applicable).
+- Annotations pointing to material, joinery, texture, and functional highlights.
+- Specification sections (Material, Finish, Feature, Height, Width, Depth, Weight).
+- Design highlights with icons for texture, structure, and functional details.
+- Color palette strip at the bottom showing tones extracted directly from the image (material color, feature color, pearl gray, dark gray).
+- VIVA MOBILI logo and header at the top for brand consistency.
+- High resolution, photorealistic quality, architectural precision, balanced lighting, and professional typography.
 
 STANDARD ERGONOMIC MEASUREMENTS (use as reference for realistic dimensions):
 - Chair: seat height 45cm, total height 80-90cm, width 45-55cm, depth 50-55cm, weight 4-8kg
@@ -136,11 +154,12 @@ RULES:
 1. All dimensions in CENTIMETERS as numbers (not strings).
 2. seatHeight is null for tables, cabinets, shelving, beds (anything without a seat).
 3. weight should be a realistic estimate in kilograms.
-4. colorPalette.primary and secondary must be valid hex colors extracted from the image.
-5. annotations must be exactly 3 descriptive strings about material, joinery, and functional highlights.
-6. material.details should list 2-4 specific material characteristics.
+4. colorPalette.primary and secondary must be valid hex colors extracted directly from the image.
+5. annotations must be exactly 3 descriptive strings: material highlight, joinery/construction, functional/texture detail.
+6. material.details should list 2-4 specific material characteristics (frame, surface, finish, hardware).
 7. Be specific with feature - describe the most distinctive design element.
-8. brand must always be "VIVA MOBILI".`;
+8. brand must always be "VIVA MOBILI".
+9. Dimension lines must be in centimeters with architectural precision.`;
 
 function parseAIResponse(content: string): { parsed: unknown } | { error: string } {
   let jsonStr = content.trim();
