@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { FurnitureData, Lang } from '@/lib/types';
-import { defaultFurnitureData } from '@/lib/types';
+import type { FurnitureData, Lang, CopilotFurnitureData, CopilotMessage } from '@/lib/types';
+import { defaultFurnitureData, defaultCopilotFurnitureData } from '@/lib/types';
 
 type AppState = 'upload' | 'analyzing' | 'editing' | 'generating' | 'approving' | 'saving' | 'complete';
 
@@ -42,6 +42,14 @@ interface AppStore {
   // AI Concept state
   conceptImageBase64: string | null;
   conceptPrompt: string | null;
+
+  // Copilot state
+  copilotOpen: boolean;
+  copilotMessages: CopilotMessage[];
+  copilotLoading: boolean;
+  copilotData: CopilotFurnitureData | null;
+  copilotViewImages: Record<string, string | null>;
+  copilotSheetPdf: string | null;
 
   // Actions
   setState: (state: AppState) => void;
@@ -98,6 +106,12 @@ export const useAppStore = create<AppStore>()(
       isApproved: false,
       conceptImageBase64: null,
       conceptPrompt: null,
+      copilotOpen: false,
+      copilotMessages: [],
+      copilotLoading: false,
+      copilotData: null,
+      copilotViewImages: { front: null, side: null, top: null, perspective: null },
+      copilotSheetPdf: null,
 
       setState: (state) => set({ appState: state }),
       setFurnitureData: (data) => set({ furnitureData: data }),
@@ -155,6 +169,13 @@ export const useAppStore = create<AppStore>()(
       setApproved: (approved) => set({ isApproved: approved }),
       setConceptImage: (base64) => set({ conceptImageBase64: base64 }),
       setConceptPrompt: (prompt) => set({ conceptPrompt: prompt }),
+      setCopilotOpen: (open) => set({ copilotOpen: open }),
+      setCopilotLoading: (loading) => set({ copilotLoading: loading }),
+      addCopilotMessage: (msg) => set((s) => ({ copilotMessages: [...s.copilotMessages, msg] })),
+      setCopilotData: (data) => set({ copilotData: data }),
+      setCopilotViewImages: (images) => set({ copilotViewImages: images }),
+      setCopilotSheetPdf: (pdf) => set({ copilotSheetPdf: pdf }),
+      clearCopilotMessages: () => set({ copilotMessages: [], copilotData: null, copilotViewImages: { front: null, side: null, top: null, perspective: null }, copilotSheetPdf: null }),
       addCatalogItem: (item, image) => set((s) => ({
         catalogItems: [...s.catalogItems, item],
         catalogImages: [...s.catalogImages, image],
@@ -175,6 +196,9 @@ export const useAppStore = create<AppStore>()(
         isApproved: false,
         conceptImageBase64: null,
         conceptPrompt: null,
+        copilotData: null,
+        copilotViewImages: { front: null, side: null, top: null, perspective: null },
+        copilotSheetPdf: null,
       }),
       resetAll: () => set({
         appState: 'upload',
@@ -194,6 +218,9 @@ export const useAppStore = create<AppStore>()(
         isApproved: false,
         conceptImageBase64: null,
         conceptPrompt: null,
+        copilotData: null,
+        copilotViewImages: { front: null, side: null, top: null, perspective: null },
+        copilotSheetPdf: null,
       }),
     }),
     {

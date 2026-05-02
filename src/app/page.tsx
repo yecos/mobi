@@ -9,6 +9,7 @@ import { useAnalysis } from '@/hooks/use-analysis';
 import { usePdfGeneration } from '@/hooks/use-pdf-generation';
 import { useCatalog } from '@/hooks/use-catalog';
 import { useDimensions } from '@/hooks/use-dimensions';
+import { useCopilot } from '@/hooks/use-copilot';
 import { AppHeader } from '@/components/layout/AppHeader';
 import { UploadZone } from '@/components/upload/UploadZone';
 import { FeatureCards } from '@/components/upload/FeatureCards';
@@ -20,6 +21,7 @@ import { CompleteView } from '@/components/complete/CompleteView';
 import { HeroSection } from '@/components/showcase/HeroSection';
 import { SampleShowcase } from '@/components/showcase/SampleShowcase';
 import { HowItWorks } from '@/components/showcase/HowItWorks';
+import { CopilotPanel } from '@/components/copilot/CopilotPanel';
 import { CheckCircle2, FileText, Plus, RotateCcw, Layers, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -60,6 +62,7 @@ export default function Home() {
   const { downloadPdf, previewPdf, handleGeneratePDFs, handleGenerateCombined, handleGenerateCatalog, handleApproveAndSave } = usePdfGeneration();
   const { handleAddToCatalog, handleClearCatalog, catalogCount } = useCatalog();
   const { renderDimensionInput } = useDimensions();
+  const { copilotOpen, toggleCopilot } = useCopilot();
 
   // Ref for scrolling to upload section
   const uploadRef = useRef<HTMLDivElement>(null);
@@ -106,6 +109,8 @@ export default function Home() {
           onToggleLang={toggleLang}
           showCatalogBadge={true}
           catalogCount={catalogItems.length}
+          onToggleCopilot={toggleCopilot}
+          copilotOpen={copilotOpen}
           actions={
             <Badge variant="secondary" className="bg-amber-50 text-amber-800 border-amber-200">
               <Layers className="w-3 h-3 mr-1" />
@@ -158,6 +163,7 @@ export default function Home() {
             </div>
           </main>
         </div>
+        <CopilotPanel />
       </div>
     );
   }
@@ -166,12 +172,13 @@ export default function Home() {
   if (appState === 'analyzing') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex flex-col">
-        <AppHeader lang={lang} onToggleLang={toggleLang} />
+        <AppHeader lang={lang} onToggleLang={toggleLang} onToggleCopilot={toggleCopilot} copilotOpen={copilotOpen} />
         <main className="flex-1 flex items-center justify-center px-4 sm:px-6">
           <div className="max-w-lg w-full">
             <AnalyzingView imagePreview={imagePreview} messages={analysisMessages} lang={lang} />
           </div>
         </main>
+        <CopilotPanel />
       </div>
     );
   }
@@ -187,6 +194,8 @@ export default function Home() {
           subtitle={t(lang, 'editing.subtitle')}
           showCatalogBadge={true}
           catalogCount={catalogItems.length}
+          onToggleCopilot={toggleCopilot}
+          copilotOpen={copilotOpen}
           actions={
             <>
               <Button
@@ -247,6 +256,7 @@ export default function Home() {
           onGenerateCatalog={() => handleGenerateCatalog(ultraCompressImage)}
           renderDimensionInput={renderDimensionInput}
         />
+        <CopilotPanel />
       </div>
     );
   }
@@ -259,10 +269,13 @@ export default function Home() {
           lang={lang}
           onToggleLang={toggleLang}
           title={t(lang, 'generating.title')}
+          onToggleCopilot={toggleCopilot}
+          copilotOpen={copilotOpen}
         />
         <main className="flex-1 flex items-center justify-center px-4 sm:px-6">
           <GeneratingView lang={lang} />
         </main>
+        <CopilotPanel />
       </div>
     );
   }
@@ -277,6 +290,8 @@ export default function Home() {
           onToggleLang={toggleLang}
           title={t(lang, 'approval.title')}
           subtitle={t(lang, 'approval.subtitle')}
+          onToggleCopilot={toggleCopilot}
+          copilotOpen={copilotOpen}
           actions={
             <Button variant="outline" size="sm" onClick={resetAll} className="text-stone-600">
               <RotateCcw className="w-4 h-4 mr-1" />
@@ -304,6 +319,7 @@ export default function Home() {
             conceptImageBase64={conceptImageBase64}
           />
         )}
+        <CopilotPanel />
       </div>
     );
   }
@@ -317,6 +333,8 @@ export default function Home() {
         title={t(lang, 'complete.pdfsGenerated')}
         subtitle={t(lang, 'complete.sheetsReady')}
         variant="success"
+        onToggleCopilot={toggleCopilot}
+        copilotOpen={copilotOpen}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={resetAll} className="text-stone-600">
@@ -340,6 +358,7 @@ export default function Home() {
         onNewAnalysis={resetAll}
         lang={lang}
       />
+      <CopilotPanel />
     </div>
   );
 }

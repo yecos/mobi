@@ -65,6 +65,71 @@ export interface FurnitureData {
   specialFeature?: string;  // Special feature description
 }
 
+// ─── Copilot Furniture Data (VIVA MOBILI product sheet format) ───
+export interface CopilotFurnitureData {
+  productType: string;
+  style: string;
+  material: {
+    main: string;
+    details: string[];
+  };
+  finish: string;
+  feature: string;
+  dimensions: {
+    height: number;
+    width: number;
+    depth: number;
+    seatHeight: number | null;
+  };
+  weight: number;
+  annotations: string[];
+  colorPalette: {
+    primary: string;
+    secondary: string;
+    pearlGray: string;
+    darkGray: string;
+  };
+  brand: string;
+  renderViews: string[];
+}
+
+export const defaultCopilotFurnitureData: CopilotFurnitureData = {
+  productType: '',
+  style: '',
+  material: {
+    main: '',
+    details: [],
+  },
+  finish: '',
+  feature: '',
+  dimensions: {
+    height: 0,
+    width: 0,
+    depth: 0,
+    seatHeight: null,
+  },
+  weight: 0,
+  annotations: [],
+  colorPalette: {
+    primary: '#8B7355',
+    secondary: '#D4A574',
+    pearlGray: '#E5E5E5',
+    darkGray: '#4A4A4A',
+  },
+  brand: 'VIVA MOBILI',
+  renderViews: ['front', 'side', 'top', 'perspective'],
+};
+
+// ─── Copilot Chat Message ───
+export interface CopilotMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  imageData?: string;
+  furnitureData?: CopilotFurnitureData;
+}
+
 export const defaultFurnitureData: FurnitureData = {
   productName: '',
   brand: 'Unknown',

@@ -5,7 +5,7 @@ import { t } from '@/lib/i18n';
 import type { Lang } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Globe, CheckCircle2 } from 'lucide-react';
+import { Globe, CheckCircle2, Sparkles } from 'lucide-react';
 
 interface AppHeaderProps {
   lang: Lang;
@@ -16,6 +16,8 @@ interface AppHeaderProps {
   showCatalogBadge?: boolean;
   catalogCount?: number;
   actions?: React.ReactNode;
+  onToggleCopilot?: () => void;
+  copilotOpen?: boolean;
 }
 
 export function AppHeader({
@@ -27,6 +29,8 @@ export function AppHeader({
   showCatalogBadge,
   catalogCount,
   actions,
+  onToggleCopilot,
+  copilotOpen,
 }: AppHeaderProps) {
   return (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-stone-200/60">
@@ -45,6 +49,25 @@ export function AppHeader({
         </div>
         <div className="flex items-center gap-2">
           {actions}
+
+          {/* Copilot Toggle Button */}
+          {onToggleCopilot && (
+            <Button
+              variant={copilotOpen ? 'default' : 'outline'}
+              size="sm"
+              onClick={onToggleCopilot}
+              className={copilotOpen
+                ? 'bg-amber-800 hover:bg-amber-900 text-white gap-1'
+                : 'border-amber-300 text-amber-800 hover:bg-amber-50 gap-1'
+              }
+            >
+              <Sparkles className="w-4 h-4" />
+              <span className="hidden sm:inline">
+                {lang === 'en' ? 'Copilot' : 'Copilot'}
+              </span>
+            </Button>
+          )}
+
           <Button variant="ghost" size="sm" onClick={onToggleLang} className="text-stone-600">
             <Globe className="w-4 h-4 mr-1" />
             {t(lang, 'header.language')}
