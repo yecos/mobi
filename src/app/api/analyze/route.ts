@@ -133,44 +133,61 @@ interface ProviderResult {
 }
 
 async function ensureZAIConfig(): Promise<boolean> {
-  if (isVercel()) {
-    const baseUrl = process.env.ZAI_BASE_URL;
-    const apiKey = process.env.ZAI_API_KEY;
-    return !!(baseUrl && apiKey);
-  }
-
+  // Check if config already exists at standard paths
   const configPaths = [
     path.join(process.cwd(), '.z-ai-config'),
     path.join(os.homedir(), '.z-ai-config'),
     '/etc/.z-ai-config',
+    '/tmp/.z-ai-config',  // Vercel writable tmp
   ];
 
   for (const p of configPaths) {
     try {
       const content = fs.readFileSync(p, 'utf-8');
       const config = JSON.parse(content);
-      if (config.baseUrl && config.apiKey) return true;
+      if (config.baseUrl && config.apiKey) {
+        // On Vercel, skip internal IPs
+        if (isVercel() && config.baseUrl.includes('172.')) continue;
+        return true;
+      }
     } catch {
       // File doesn't exist or invalid
     }
   }
 
+  // Try to create config from env vars
   const baseUrl = process.env.ZAI_BASE_URL;
   const apiKey = process.env.ZAI_API_KEY;
   if (!baseUrl || !apiKey) return false;
 
-  try {
-    const configPath = path.join(process.cwd(), '.z-ai-config');
-    fs.writeFileSync(configPath, JSON.stringify({
-      baseUrl,
-      apiKey,
-      chatId: process.env.ZAI_CHAT_ID,
-      token: process.env.ZAI_TOKEN,
-      userId: process.env.ZAI_USER_ID,
-    }, null, 2));
-  } catch {
-    // Write might fail but env vars exist
+  // On Vercel, skip internal IPs
+  if (isVercel() && baseUrl.includes('172.')) return false;
+
+  // Try writing config file
+  const configData = JSON.stringify({
+    baseUrl,
+    apiKey,
+    chatId: process.env.ZAI_CHAT_ID,
+    token: process.env.ZAI_TOKEN,
+    userId: process.env.ZAI_USER_ID,
+  }, null, 2);
+
+  // Try multiple writable locations
+  const writePaths = isVercel()
+    ? ['/tmp/.z-ai-config']  // Only /tmp is writable on Vercel
+    : [path.join(process.cwd(), '.z-ai-config'), '/tmp/.z-ai-config'];
+
+  for (const writePath of writePaths) {
+    try {
+      fs.writeFileSync(writePath, configData);
+      console.log(`[analyze] Z-AI config written to ${writePath}`);
+      return true;
+    } catch {
+      // Can't write here, try next
+    }
   }
+
+  // Even if write fails, env vars exist — SDK might pick them up
   return true;
 }
 
