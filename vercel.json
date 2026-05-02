@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "src/app/api/analyze/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/generate-drawing/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/generate-pdf/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
