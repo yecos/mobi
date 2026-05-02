@@ -180,7 +180,10 @@ export function useFicha() {
       const res = await fetch('/api/copilot/generate-ficha-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ furnitureData: data }),
+        body: JSON.stringify({
+          furnitureData: data,
+          originalImage: imageBase64, // Pass original furniture image for reference
+        }),
       });
       const result = await res.json();
       if (result.success && result.image) {
@@ -189,7 +192,7 @@ export function useFicha() {
     } catch (err) {
       console.warn('[ficha] Background ficha image generation failed:', err);
     }
-  }, [setFichaAiImage]);
+  }, [setFichaAiImage, imageBase64]);
 
   /**
    * Step 2: After editing, go to review screen

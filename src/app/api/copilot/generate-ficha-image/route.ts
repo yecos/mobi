@@ -71,62 +71,78 @@ interface FurnitureInfo {
   weight: number;
 }
 
+/**
+ * Build the ficha image prompt using the SAME prompt the user uses in ChatGPT.
+ * This is the exact prompt that generates photorealistic VIVA MOBILI product sheets.
+ */
 function buildFichaImagePrompt(data: FurnitureInfo): string {
-  const { productType, style, material, finish, feature, dimensions, colorPalette, brand, annotations, weight } = data;
+  const { productType, style, material, finish, feature, dimensions, colorPalette, annotations, weight } = data;
   const h = dimensions.height;
   const w = dimensions.width;
   const d = dimensions.depth;
-  const sh = dimensions.seatHeight ? ` Seat height: ${dimensions.seatHeight}cm.` : '';
+  const seatInfo = dimensions.seatHeight ? ` Seat height: ${dimensions.seatHeight}cm.` : '';
 
-  return `Create a professional VIVA MOBILI furniture technical product sheet as a single high-resolution image.
+  return `Generate a realistic technical product sheet image for a VIVA MOBILI ${style} ${productType}.
 
-LAYOUT: Vertical A4 format product sheet with the following sections:
+PRODUCT DATA:
+- Type: ${productType}
+- Style: ${style}
+- Material: ${material.main} (${material.details.join(', ')})
+- Finish: ${finish}
+- Feature: ${feature}
+- Dimensions: Height ${h}cm × Width ${w}cm × Depth ${d}cm${seatInfo}
+- Weight: ${weight} kg
+- Annotations: ${annotations.join(' | ')}
+- Colors: Primary ${colorPalette.primary}, Secondary ${colorPalette.secondary}
 
-TOP: A horizontal header bar colored ${colorPalette.primary} with "VIVA MOBILI" in bold white text on the left and "PRODUCT TECHNICAL SHEET" in small white text on the right.
+THE IMAGE MUST INCLUDE ALL OF THESE ELEMENTS:
 
-TITLE SECTION: The product type "${productType.toUpperCase()}" in large bold dark gray text. Below it: "${style} style  •  ${material.main}  •  ${finish}" in smaller gray text. A thin ${colorPalette.primary} horizontal line separator.
+1. HEADER: A horizontal bar at the top with "VIVA MOBILI" logo in bold white text on the left, and "PRODUCT TECHNICAL SHEET" in smaller white text on the right. Bar color: ${colorPalette.primary}.
 
-LEFT COLUMN - SPECIFICATIONS: A vertical list of specification rows, each with a light gray background pill showing the label on the left and value on the right:
-- MATERIAL: ${material.main}
-- FINISH: ${finish}
-- FEATURE: ${feature}
-- HEIGHT: ${h} cm
-- WIDTH: ${w} cm
-- DEPTH: ${d} cm
-- WEIGHT: ${weight} kg${dimensions.seatHeight ? `\n- SEAT HEIGHT: ${dimensions.seatHeight} cm` : ''}
+2. PRODUCT TITLE: "${productType.toUpperCase()}" in large bold text. Below: "${style} style  •  ${material.main}  •  ${finish}" in smaller text. A thin ${colorPalette.primary} separator line.
 
-MATERIAL DETAILS: Small bullet points listing: ${material.details.join(', ')}
+3. FOUR VIEWS in a 2×2 grid on pearl gray (${colorPalette.pearlGray}) background boxes:
+   - TOP LEFT: FRONT VIEW with dimension lines showing H=${h}cm and W=${w}cm
+   - TOP RIGHT: SIDE VIEW with dimension lines showing H=${h}cm and D=${d}cm
+   - BOTTOM LEFT: TOP VIEW with dimension lines showing W=${w}cm and D=${d}cm
+   - BOTTOM RIGHT: 3/4 PERSPECTIVE elevated angle view
+   Each view must be rendered PHOTOREALISTICALLY showing the actual ${productType} in ${material.main} with ${finish} finish.
 
-RIGHT COLUMN - FOUR VIEWS: A 2x2 grid of view boxes on ${colorPalette.pearlGray} background:
-- TOP LEFT: FRONT VIEW showing the ${productType} from the front with dimension lines for H=${h}cm and W=${w}cm
-- TOP RIGHT: SIDE VIEW showing from the side with dimension lines for H=${h}cm and D=${d}cm
-- BOTTOM LEFT: TOP/DOWN VIEW showing from above with dimension lines for W=${w}cm and D=${d}cm
-- BOTTOM RIGHT: 3/4 PERSPECTIVE VIEW showing an elevated 3/4 angle view
+4. SPECIFICATIONS section listing:
+   Material: ${material.main}
+   Finish: ${finish}
+   Feature: ${feature}
+   Height: ${h} cm
+   Width: ${w} cm
+   Depth: ${d} cm${dimensions.seatHeight ? `\n   Seat Height: ${dimensions.seatHeight} cm` : ''}
+   Weight: ${weight} kg
 
-DESIGN HIGHLIGHTS: Three annotation rows with icons:
-◈ TEXTURE: ${annotations[0] || 'Material highlight'}
-⬡ STRUCTURE: ${annotations[1] || 'Joinery detail'}
-◆ FUNCTIONAL: ${annotations[2] || 'Feature detail'}
+5. DESIGN HIGHLIGHTS with icons:
+   ◈ TEXTURE: ${annotations[0] || 'Material highlight'}
+   ⬡ STRUCTURE: ${annotations[1] || 'Joinery detail'}
+   ◆ FUNCTIONAL: ${annotations[2] || 'Feature detail'}
 
-COLOR PALETTE: A row of four colored rectangles:
-- ${colorPalette.primary} labeled "Material"
-- ${colorPalette.secondary} labeled "Feature"
-- ${colorPalette.pearlGray} labeled "Pearl Gray"
-- ${colorPalette.darkGray} labeled "Dark Gray"
+6. COLOR PALETTE strip: Four colored rectangles labeled:
+   - ${colorPalette.primary} "Material"
+   - ${colorPalette.secondary} "Feature"
+   - ${colorPalette.pearlGray} "Pearl Gray"
+   - ${colorPalette.darkGray} "Dark Gray"
 
-FOOTER: A horizontal bar colored ${colorPalette.primary} with "VIVA MOBILI  •  Professional Furniture Specifications" in white text on the left and today's date on the right.
+7. FOOTER: A horizontal bar with "VIVA MOBILI  •  Professional Furniture Specifications" in white text.
 
-STYLE: Clean, professional, architectural precision. Helvetica typography. Studio lighting. Pearl gray backgrounds for view boxes. Print-quality resolution. No photorealistic furniture renders in the view boxes — use clean technical drawings with dimension lines and arrows. The overall design should look like a professional furniture catalog specification page.`;
+STYLE: Photorealistic quality, architectural precision, balanced studio lighting, professional Helvetica typography, dimension lines with arrows in centimeters. The four views must look like real product photography on a neutral pearl gray background, not flat illustrations. The overall design should look like a premium furniture catalog specification page.`;
 }
 
 /**
  * Generate a photorealistic VIVA MOBILI product sheet image using AI.
- * This creates a complete ficha as an AI-generated image alongside the JS data.
+ * Uses the same prompt structure that the user uses in ChatGPT for consistent results.
+ * Now accepts the original furniture image to use as reference via vision-to-image generation.
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const furnitureData = body.furnitureData as FurnitureInfo;
+    const originalImageBase64 = body.originalImage as string | undefined;
 
     if (!furnitureData) {
       return NextResponse.json({ error: 'No furniture data provided' }, { status: 400 });
@@ -135,16 +151,68 @@ export async function POST(req: NextRequest) {
     const prompt = buildFichaImagePrompt(furnitureData);
     let imageBase64: string | null = null;
 
-    // ── Provider 1: Z-AI Image Generation — PRIMARY ──
+    // ── Strategy 1: Use Z-AI Vision to generate ficha image WITH the original furniture photo ──
+    // This mirrors the ChatGPT experience: send image + prompt → get ficha image
     const useZai = await ensureZAIConfig();
-    if (useZai) {
-      console.log('[copilot-ficha-image] Generating ficha image with Z-AI...');
+    if (useZai && originalImageBase64) {
+      console.log('[copilot-ficha-image] Generating ficha image with Z-AI Vision (image reference)...');
+      try {
+        const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
+
+        // Use vision chat to understand the furniture, then generate image
+        // First: ask vision model to enhance the prompt based on the actual furniture photo
+        const visionResponse = await withTimeout(
+          zai.chat.completions.create({
+            model: 'glm-4v-plus',
+            messages: [{
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `Look at this furniture image carefully. I need you to enhance this product sheet generation prompt with specific visual details you can see in the image (exact color tones, texture descriptions, shape details, material appearance). Return ONLY the enhanced prompt text, nothing else:\n\n${prompt}`,
+                },
+                {
+                  type: 'image_url',
+                  image_url: { url: originalImageBase64.startsWith('data:') ? originalImageBase64 : `data:image/jpeg;base64,${originalImageBase64}` },
+                },
+              ],
+            }],
+            stream: false,
+          }),
+          30_000,
+          'Z-AI Vision Enhancement'
+        );
+
+        const enhancedPrompt = visionResponse.choices?.[0]?.message?.content || prompt;
+        console.log('[copilot-ficha-image] Prompt enhanced with furniture visual details');
+
+        // Now generate the image with the enhanced prompt
+        const imageResponse = await withTimeout(
+          zai.images.generations.create({
+            prompt: enhancedPrompt.length > 3000 ? enhancedPrompt.substring(0, 3000) : enhancedPrompt,
+            size: '768x1344',
+          }),
+          60_000,
+          'Z-AI Ficha Image (Enhanced)'
+        );
+        imageBase64 = imageResponse.data?.[0]?.base64 || null;
+        if (imageBase64) {
+          console.log('[copilot-ficha-image] ✅ Z-AI ficha image generated with furniture reference');
+        }
+      } catch (err) {
+        console.warn('[copilot-ficha-image] Z-AI Vision+Image failed:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // ── Strategy 2: Z-AI Image Generation (without furniture reference) ──
+    if (!imageBase64 && useZai) {
+      console.log('[copilot-ficha-image] Generating ficha image with Z-AI (text only)...');
       try {
         const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
         const response = await withTimeout(
           zai.images.generations.create({
             prompt,
-            size: '768x1344', // A4-like proportions
+            size: '768x1344',
           }),
           60_000,
           'Z-AI Ficha Image'
@@ -154,11 +222,11 @@ export async function POST(req: NextRequest) {
           console.log('[copilot-ficha-image] ✅ Z-AI ficha image generated');
         }
       } catch (err) {
-        console.warn('[copilot-ficha-image] Z-AI failed:', err instanceof Error ? err.message : String(err));
+        console.warn('[copilot-ficha-image] Z-AI image gen failed:', err instanceof Error ? err.message : String(err));
       }
     }
 
-    // ── Provider 2: Azure OpenAI DALL-E 3 — OPTIONAL ──
+    // ── Provider 3: Azure OpenAI DALL-E 3 — OPTIONAL ──
     if (!imageBase64 && isAzureConfigured()) {
       console.log('[copilot-ficha-image] Trying Azure DALL-E 3...');
       try {

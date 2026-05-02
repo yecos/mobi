@@ -97,48 +97,48 @@ const COPILOT_ANALYSIS_PROMPT = `Analyze the uploaded furniture image and automa
 - Finish/color (natural, matte, polished, etc.)
 - Distinctive feature (woven cane, modularity, storage, etc.)
 
-Then generate a realistic technical product sheet. Return JSON ONLY (no markdown, no code blocks):
+Generate a realistic technical product sheet with the following elements:
+- Four views — front, side, top, and elevated 3/4 perspective — rendered photorealistically on a pearl gray background.
+- Dimension lines (in centimeters) for height, width, depth, and seat height (if applicable).
+- Annotations pointing to material, joinery, texture, and functional highlights.
+- Specification sections (Material, Finish, Feature, Height, Width, Depth, Weight).
+- Design highlights with icons for texture, structure, and functional details.
+- Color palette strip at the bottom showing tones extracted directly from the image (material color, feature color, pearl gray, dark gray).
+- Maintain the VIVA MOBILI logo and header at the top for brand consistency.
+- High resolution, photorealistic quality, architectural precision, balanced lighting, and professional typography.
+
+Finally, generate a JavaScript object with all extracted data. Return JSON ONLY (no markdown, no code blocks, no explanation):
 
 {
-  "productType": "<chair|stool|table|sofa|bed|desk|cabinet|shelving|bench|ottoman>",
-  "style": "<modern|minimalist|luxury|industrial|scandinavian|mid-century|rustic|transitional|contemporary|art-deco>",
+  "productType": "<detected type>",
+  "style": "<detected style>",
   "material": {
-    "main": "<wood|metal|fabric|leather|glass|stone|rattan|bamboo|plastic|composite>",
-    "details": ["<specific material detail about frame/structure>", "<specific material detail about surface/upholstery>", "<specific material detail about finish/joinery>", "<specific material detail about hardware/accessories>"]
+    "main": "<main material>",
+    "details": ["<material details>"]
   },
-  "finish": "<natural|matte|polished|lacquered|oiled|waxed|brushed|powder-coated|upholstered|stained>",
-  "feature": "<woven cane|modularity|storage|reclining|extendable|foldable|stackable|convertible|built-in lighting|adjustable height|any distinctive feature>",
+  "finish": "<finish description>",
+  "feature": "<distinctive feature>",
   "dimensions": {
-    "height": <total_height_in_cm_as_number>,
-    "width": <width_in_cm_as_number>,
-    "depth": <depth_in_cm_as_number>,
-    "seatHeight": <seat_height_in_cm_as_number_or_null_if_not_applicable>
+    "height": <height_cm>,
+    "width": <width_cm>,
+    "depth": <depth_cm>,
+    "seatHeight": <seat_height_cm_if_applicable_or_null>
   },
-  "weight": <weight_in_kg_as_number>,
+  "weight": <weight_kg>,
   "annotations": [
-    "<annotation pointing to material highlight with texture description, e.g. 'Solid oak frame with visible grain pattern'>",
-    "<annotation pointing to joinery/construction technique, e.g. 'Mortise and tenon joints at frame connections'>",
-    "<annotation pointing to functional/highlight detail, e.g. 'Hand-woven cane panel with natural finish'>"
+    "<annotation 1>",
+    "<annotation 2>",
+    "<annotation 3>"
   ],
   "colorPalette": {
-    "primary": "<hex color of main material extracted directly from image>",
-    "secondary": "<hex color of accent/feature extracted directly from image>",
+    "primary": "<main color hex>",
+    "secondary": "<secondary color hex>",
     "pearlGray": "#E5E5E5",
     "darkGray": "#4A4A4A"
   },
   "brand": "VIVA MOBILI",
   "renderViews": ["front", "side", "top", "perspective"]
 }
-
-The product sheet should envision:
-- Four views: front, side, top, and elevated 3/4 perspective, rendered photorealistically on a pearl gray background.
-- Dimension lines (in centimeters) for height, width, depth, and seat height (if applicable).
-- Annotations pointing to material, joinery, texture, and functional highlights.
-- Specification sections (Material, Finish, Feature, Height, Width, Depth, Weight).
-- Design highlights with icons for texture, structure, and functional details.
-- Color palette strip at the bottom showing tones extracted directly from the image (material color, feature color, pearl gray, dark gray).
-- VIVA MOBILI logo and header at the top for brand consistency.
-- High resolution, photorealistic quality, architectural precision, balanced lighting, and professional typography.
 
 STANDARD ERGONOMIC MEASUREMENTS (use as reference for realistic dimensions):
 - Chair: seat height 45cm, total height 80-90cm, width 45-55cm, depth 50-55cm, weight 4-8kg
@@ -156,10 +156,10 @@ RULES:
 3. weight should be a realistic estimate in kilograms.
 4. colorPalette.primary and secondary must be valid hex colors extracted directly from the image.
 5. annotations must be exactly 3 descriptive strings: material highlight, joinery/construction, functional/texture detail.
-6. material.details should list 2-4 specific material characteristics (frame, surface, finish, hardware).
-7. Be specific with feature - describe the most distinctive design element.
+6. material.details should list 2-4 specific material characteristics.
+7. Be specific with feature — describe the most distinctive design element.
 8. brand must always be "VIVA MOBILI".
-9. Dimension lines must be in centimeters with architectural precision.`;
+9. Return ONLY the JSON object, nothing else.`;
 
 function parseAIResponse(content: string): { parsed: unknown } | { error: string } {
   let jsonStr = content.trim();
