@@ -91,6 +91,7 @@ export const translations: Record<Lang, Translations> = {
       widthExtended: 'Width Extended',
       seatDepth: 'Seat Depth',
       depthExtended: 'Depth Extended',
+      observations: 'Observations',
     },
     generating: {
       title: 'Generating PDFs',
@@ -110,6 +111,7 @@ export const translations: Record<Lang, Translations> = {
       catalogVersion: 'Catalog Version',
       metricLabel: 'Metric',
       imperialLabel: 'Imperial',
+      dimsInCm: 'Dimensions in centimeters',
       dimsInMeters: 'Dimensions in meters',
       dimsInFeetInches: 'Dimensions in feet & inches',
       clickPreviewMetric: 'Click to preview',
@@ -126,6 +128,13 @@ export const translations: Record<Lang, Translations> = {
       none: 'None',
       editSpecs: 'Edit Specifications',
       newAnalysis: 'New Analysis',
+    },
+    approval: {
+      title: 'Review Technical Plans',
+      subtitle: 'Verify the generated technical drawings before saving',
+      approve: 'Approve & Save',
+      reject: 'Go Back & Edit',
+      generatingViews: 'Generating technical views...',
     },
     catalog: {
       addToCatalog: 'Add to Catalog',
@@ -259,6 +268,7 @@ export const translations: Record<Lang, Translations> = {
       widthExtended: 'Ancho Extendido',
       seatDepth: 'Profundidad de Asiento',
       depthExtended: 'Profundidad Extendida',
+      observations: 'Observaciones',
     },
     generating: {
       title: 'Generando PDFs',
@@ -278,6 +288,7 @@ export const translations: Record<Lang, Translations> = {
       catalogVersion: 'Versión Catálogo',
       metricLabel: 'Métrico',
       imperialLabel: 'Imperial',
+      dimsInCm: 'Dimensiones en centímetros',
       dimsInMeters: 'Dimensiones en metros',
       dimsInFeetInches: 'Dimensiones en pies y pulgadas',
       clickPreviewMetric: 'Clic para previsualizar',
@@ -294,6 +305,13 @@ export const translations: Record<Lang, Translations> = {
       none: 'Ninguno',
       editSpecs: 'Editar Especificaciones',
       newAnalysis: 'Nuevo Análisis',
+    },
+    approval: {
+      title: 'Revisar Planos Técnicos',
+      subtitle: 'Verifica los dibujos técnicos generados antes de guardar',
+      approve: 'Aprobar y Guardar',
+      reject: 'Volver y Editar',
+      generatingViews: 'Generando vistas técnicas...',
     },
     catalog: {
       addToCatalog: 'Agregar al Catálogo',

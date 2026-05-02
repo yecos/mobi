@@ -38,6 +38,13 @@ export interface ShapeProfile {
   sideProfile: string;
 }
 
+export interface MaterialItem {
+  material: string;
+  quantity: number;
+  description: string;
+  observations: string;
+}
+
 export interface FurnitureData {
   productName: string;
   brand: string;
@@ -45,12 +52,13 @@ export interface FurnitureData {
   description: string;
   descriptionEs: string;
   dimensions: Dimensions;
-  materials: string[];
+  materials: MaterialItem[];
   quantity: number;
   colorFinishes: ColorFinish[];
   loungeConfigurations: LoungeConfiguration[];
   category: string;
   tags: string[];
+  observations: string;
   shapeProfile: ShapeProfile;
 }
 
@@ -74,6 +82,7 @@ export const defaultFurnitureData: FurnitureData = {
   loungeConfigurations: [],
   category: 'sofa',
   tags: [],
+  observations: '',
   shapeProfile: {
     bodyShape: 'rectangular',
     cornerStyle: 'sharp',

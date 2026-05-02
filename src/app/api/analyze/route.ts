@@ -36,12 +36,13 @@ const PROMPT_TEXT = `Analyze this furniture image. Return JSON ONLY (no markdown
     "seatDepth": { "feet": 0, "inches": 0 },
     "depthExtended": { "feet": 0, "inches": 0 }
   },
-  "materials": ["string"],
+  "materials": [{ "material": "string", "quantity": 1, "description": "string", "observations": "string" }],
   "quantity": 1,
   "colorFinishes": [{ "name": "string", "color": "#hex" }],
   "loungeConfigurations": [{ "name": "string", "units": 0 }],
   "category": "sofa|chair|table|cabinet|bed|desk|shelving",
   "tags": ["string"],
+  "observations": "",
   "shapeProfile": {
     "bodyShape": "rectangular|rounded|curved|L-shape|circular|oval|tapered|organic",
     "cornerStyle": "sharp|slightly-rounded|fully-rounded|curved",
@@ -56,7 +57,14 @@ const PROMPT_TEXT = `Analyze this furniture image. Return JSON ONLY (no markdown
     "sideProfile": "describe side profile shape"
   }
 }
-RULES: Dimensions in feet+inches (1m=3.28084ft). height,width,depth REQUIRED. widthExtended/seatDepth/depthExtended use {feet:0,inches:0} if N/A. shapeProfile REQUIRED.`;
+
+STANDARD ERGONOMIC MEASUREMENTS (use as reference):
+- Chair: seat height ≈ 45cm (1'6"), total height ≈ 80-90cm (2'8"-3')
+- Sofa: seat height ≈ 42-45cm (1'5"-1'6"), total height ≈ 80-100cm (2'8"-3'3")
+- Table: table top height ≈ 75cm (2'6"), total height ≈ 75-78cm
+- Bed: headboard above mattress ≈ 50cm (1'8"), mattress height ≈ 25-35cm
+
+RULES: Dimensions in feet+inches (1m=3.28084ft). height,width,depth REQUIRED. widthExtended/seatDepth/depthExtended use {feet:0,inches:0} if N/A. shapeProfile REQUIRED. materials as array of objects with material, quantity, description, observations.`;
 
 interface ProviderResult {
   success: boolean;

@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { FurnitureData, Lang } from '@/lib/types';
 import { defaultFurnitureData } from '@/lib/types';
 
-type AppState = 'upload' | 'analyzing' | 'editing' | 'generating' | 'complete';
+type AppState = 'upload' | 'analyzing' | 'editing' | 'generating' | 'approving' | 'saving' | 'complete';
 
 interface AppStore {
   // Core state
@@ -35,6 +35,10 @@ interface AppStore {
   // Metric edit mode temp values
   metricEdits: Partial<Record<string, number>>;
 
+  // SVG / Approval state
+  svgViews: { plant: string | null; frontal: string | null; lateral: string | null };
+  isApproved: boolean;
+
   // Actions
   setState: (state: AppState) => void;
   setFurnitureData: (data: FurnitureData) => void;
@@ -56,6 +60,8 @@ interface AppStore {
   setCombinedPdf: (pdf: string | null) => void;
   setCatalogPdf: (pdf: string | null) => void;
   setTechnicalDrawing: (base64: string | null) => void;
+  setSvgViews: (views: { plant: string; frontal: string; lateral: string }) => void;
+  setApproved: (approved: boolean) => void;
   addCatalogItem: (item: FurnitureData, image: string) => void;
   clearCatalog: () => void;
   resetForNewPiece: () => void;
@@ -82,6 +88,8 @@ export const useAppStore = create<AppStore>()(
       catalogItems: [],
       catalogImages: [],
       metricEdits: {},
+      svgViews: { plant: null, frontal: null, lateral: null },
+      isApproved: false,
 
       setState: (state) => set({ appState: state }),
       setFurnitureData: (data) => set({ furnitureData: data }),
@@ -135,6 +143,8 @@ export const useAppStore = create<AppStore>()(
       setCombinedPdf: (pdf) => set({ combinedPdf: pdf }),
       setCatalogPdf: (pdf) => set({ catalogPdf: pdf }),
       setTechnicalDrawing: (base64) => set({ technicalDrawingBase64: base64 }),
+      setSvgViews: (views) => set({ svgViews: views }),
+      setApproved: (approved) => set({ isApproved: approved }),
       addCatalogItem: (item, image) => set((s) => ({
         catalogItems: [...s.catalogItems, item],
         catalogImages: [...s.catalogImages, image],
@@ -151,6 +161,8 @@ export const useAppStore = create<AppStore>()(
         catalogPdf: null,
         technicalDrawingBase64: null,
         metricEdits: {},
+        svgViews: { plant: null, frontal: null, lateral: null },
+        isApproved: false,
       }),
       resetAll: () => set({
         appState: 'upload',
@@ -166,6 +178,8 @@ export const useAppStore = create<AppStore>()(
         catalogPdf: null,
         technicalDrawingBase64: null,
         metricEdits: {},
+        svgViews: { plant: null, frontal: null, lateral: null },
+        isApproved: false,
       }),
     }),
     {

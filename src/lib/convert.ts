@@ -32,5 +32,27 @@ export function formatImperial(dim: DimensionValue): string {
 
 export function formatMetric(dim: DimensionValue): string {
   if (!dim || (dim.feet === 0 && dim.inches === 0)) return '—';
-  return `${feetInchesToMeters(dim.feet, dim.inches)} m`;
+  const cm = (dim.feet * 12 + dim.inches) * 2.54;
+  return `${cm.toFixed(1)} cm`;
+}
+
+export function dimensionToCm(dim: DimensionValue): number {
+  return (dim.feet * 12 + dim.inches) * 2.54;
+}
+
+export function cmToDimensionValue(cm: number): DimensionValue {
+  const totalInches = cm / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round(totalInches % 12);
+  if (inches >= 12) return { feet: feet + 1, inches: 0 };
+  return { feet, inches };
+}
+
+export function displayDimension(cm: number, system: 'metric' | 'imperial'): string {
+  if (system === 'metric') return `${cm.toFixed(1)} cm`;
+  const totalInches = cm / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round(totalInches % 12);
+  if (feet > 0) return `${feet}' ${inches}"`;
+  return `${inches}"`;
 }

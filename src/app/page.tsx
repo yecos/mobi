@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { t } from '@/lib/i18n';
 import { useLanguage } from '@/hooks/use-language';
@@ -15,11 +15,12 @@ import { FeatureCards } from '@/components/upload/FeatureCards';
 import { AnalyzingView } from '@/components/analyzing/AnalyzingView';
 import { GeneratingView } from '@/components/generating/GeneratingView';
 import { EditingView } from '@/components/editing/EditingView';
+import { ApprovalView } from '@/components/approval/ApprovalView';
 import { CompleteView } from '@/components/complete/CompleteView';
 import { HeroSection } from '@/components/showcase/HeroSection';
 import { SampleShowcase } from '@/components/showcase/SampleShowcase';
 import { HowItWorks } from '@/components/showcase/HowItWorks';
-import { CheckCircle2, FileText, Plus, RotateCcw, Layers } from 'lucide-react';
+import { CheckCircle2, FileText, Plus, RotateCcw, Layers, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { FurnitureData } from '@/lib/types';
@@ -39,6 +40,7 @@ export default function Home() {
   const combinedPdf = useAppStore((s) => s.combinedPdf);
   const catalogPdf = useAppStore((s) => s.catalogPdf);
   const catalogItems = useAppStore((s) => s.catalogItems);
+  const svgViews = useAppStore((s) => s.svgViews);
   const updateField = useAppStore((s) => s.updateField);
   const setUnitMode = useAppStore((s) => s.setUnitMode);
   const resetAll = useAppStore((s) => s.resetAll);
@@ -47,11 +49,14 @@ export default function Home() {
   const setImageBase64 = useAppStore((s) => s.setImageBase64);
   const setState = useAppStore((s) => s.setState);
 
+  // Local state for saving indicator
+  const [isSaving, setIsSaving] = useState(false);
+
   // Hooks
   const { lang, toggleLang } = useLanguage();
   const { handleFile, handleDrag, handleDrop, ultraCompressImage, removeImage } = useImageUpload();
   const { handleAnalyze } = useAnalysis();
-  const { downloadPdf, previewPdf, handleGeneratePDFs, handleGenerateCombined, handleGenerateCatalog } = usePdfGeneration();
+  const { downloadPdf, previewPdf, handleGeneratePDFs, handleGenerateCombined, handleGenerateCatalog, handleApproveAndSave } = usePdfGeneration();
   const { handleAddToCatalog, handleClearCatalog, catalogCount } = useCatalog();
   const { renderDimensionInput } = useDimensions();
 
@@ -78,6 +83,18 @@ export default function Home() {
     setImageBase64(placeholderSvg);
     setState('editing');
   }, [setFurnitureData, setImagePreview, setImageBase64, setState]);
+
+  // Approve handler: save project then go to complete
+  const onApprove = useCallback(async () => {
+    setIsSaving(true);
+    await handleApproveAndSave();
+    setIsSaving(false);
+  }, [handleApproveAndSave]);
+
+  // Reject handler: go back to editing
+  const onReject = useCallback(() => {
+    setState('editing');
+  }, [setState]);
 
   // STATE: Upload
   if (appState === 'upload') {
@@ -249,6 +266,46 @@ export default function Home() {
     );
   }
 
+  // STATE: Approving
+  if (appState === 'approving' || appState === 'saving') {
+    const isSavingState = appState === 'saving';
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex flex-col">
+        <AppHeader
+          lang={lang}
+          onToggleLang={toggleLang}
+          title={t(lang, 'approval.title')}
+          subtitle={t(lang, 'approval.subtitle')}
+          actions={
+            <Button variant="outline" size="sm" onClick={resetAll} className="text-stone-600">
+              <RotateCcw className="w-4 h-4 mr-1" />
+              {t(lang, 'editing.startOver')}
+            </Button>
+          }
+        />
+        {isSavingState ? (
+          <main className="flex-1 flex items-center justify-center px-4 sm:px-6">
+            <div className="text-center">
+              <Loader2 className="w-10 h-10 text-amber-700 animate-spin mx-auto mb-4" />
+              <p className="text-stone-600 font-medium">
+                {lang === 'en' ? 'Saving project...' : 'Guardando proyecto...'}
+              </p>
+            </div>
+          </main>
+        ) : (
+          <ApprovalView
+            furnitureData={furnitureData}
+            svgViews={svgViews}
+            lang={lang}
+            onApprove={onApprove}
+            onReject={onReject}
+            isSaving={isSaving}
+          />
+        )}
+      </div>
+    );
+  }
+
   // STATE: Complete
   return (
     <div className="min-h-screen bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-100 flex flex-col">
@@ -273,6 +330,7 @@ export default function Home() {
         combinedPdf={combinedPdf}
         catalogPdf={catalogPdf}
         furnitureData={furnitureData}
+        svgViews={svgViews}
         catalogCount={catalogItems.length}
         onDownload={downloadPdf}
         onPreview={previewPdf}

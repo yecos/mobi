@@ -4,10 +4,24 @@ import React from 'react';
 import { CheckCircle2, FileText, Download, Ruler, Layers, AlertCircle, ExternalLink, RotateCcw, Pencil, Plus } from 'lucide-react';
 import { t } from '@/lib/i18n';
 import type { Lang } from '@/lib/i18n';
-import type { FurnitureData } from '@/lib/types';
-import { feetInchesToMeters } from '@/lib/convert';
+import type { FurnitureData, MaterialItem } from '@/lib/types';
+import { SvgPreview } from '@/components/svg-preview';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+
+/** Normalize materials to MaterialItem[] — handles legacy string[] format */
+function normalizeMaterials(materials: MaterialItem[] | string[]): MaterialItem[] {
+  if (!materials || materials.length === 0) return [];
+  if (typeof materials[0] === 'string') {
+    return (materials as unknown as string[]).map((m) => ({
+      material: m,
+      quantity: 1,
+      description: '',
+      observations: '',
+    }));
+  }
+  return materials as MaterialItem[];
+}
 
 interface CompleteViewProps {
   metricPdf: string | null;
@@ -15,6 +29,7 @@ interface CompleteViewProps {
   combinedPdf: string | null;
   catalogPdf: string | null;
   furnitureData: FurnitureData;
+  svgViews: { plant: string | null; frontal: string | null; lateral: string | null };
   catalogCount: number;
   onDownload: (base64: string, filename: string) => void;
   onPreview: (base64: string) => void;
@@ -29,6 +44,7 @@ export function CompleteView({
   combinedPdf,
   catalogPdf,
   furnitureData,
+  svgViews,
   catalogCount,
   onDownload,
   onPreview,
@@ -37,6 +53,12 @@ export function CompleteView({
   lang,
 }: CompleteViewProps) {
   const hasAnyPdf = metricPdf || imperialPdf || combinedPdf || catalogPdf;
+  const materials = normalizeMaterials(furnitureData.materials);
+
+  // Convert feet/inches to cm
+  const heightCm = ((furnitureData.dimensions.height.feet * 12 + furnitureData.dimensions.height.inches) * 2.54).toFixed(1);
+  const widthCm = ((furnitureData.dimensions.width.feet * 12 + furnitureData.dimensions.width.inches) * 2.54).toFixed(1);
+  const depthCm = ((furnitureData.dimensions.depth.feet * 12 + furnitureData.dimensions.depth.inches) * 2.54).toFixed(1);
 
   return (
     <main className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 py-8">
@@ -53,6 +75,13 @@ export function CompleteView({
           <span className="font-semibold text-amber-800">{furnitureData.productName}</span>
         </p>
       </div>
+
+      {/* SVG Technical Drawing Preview */}
+      {(svgViews.plant || svgViews.frontal || svgViews.lateral) && (
+        <div className="max-w-4xl mx-auto mb-8">
+          <SvgPreview svgViews={svgViews} />
+        </div>
+      )}
 
       {/* PDF Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
@@ -89,7 +118,7 @@ export function CompleteView({
               </div>
               <div>
                 <h3 className="font-bold text-stone-900">{t(lang, 'complete.metricVersion')}</h3>
-                <p className="text-xs text-stone-500">{t(lang, 'complete.dimsInMeters')}</p>
+                <p className="text-xs text-stone-500">{t(lang, 'complete.dimsInCm')}</p>
               </div>
             </div>
             <Button
@@ -281,28 +310,27 @@ export function CompleteView({
               <div className="p-3 rounded-lg bg-stone-50">
                 <p className="text-stone-500 text-xs mb-1">{t(lang, 'editing.height')}</p>
                 <p className="font-semibold text-stone-900">
-                  {furnitureData.dimensions.height.feet}&apos; {furnitureData.dimensions.height.inches}&quot; (
-                  {feetInchesToMeters(furnitureData.dimensions.height.feet, furnitureData.dimensions.height.inches)} m)
+                  {furnitureData.dimensions.height.feet}&apos; {furnitureData.dimensions.height.inches}&quot; ({heightCm} cm)
                 </p>
               </div>
               <div className="p-3 rounded-lg bg-stone-50">
                 <p className="text-stone-500 text-xs mb-1">{t(lang, 'editing.width')}</p>
                 <p className="font-semibold text-stone-900">
-                  {furnitureData.dimensions.width.feet}&apos; {furnitureData.dimensions.width.inches}&quot; (
-                  {feetInchesToMeters(furnitureData.dimensions.width.feet, furnitureData.dimensions.width.inches)} m)
+                  {furnitureData.dimensions.width.feet}&apos; {furnitureData.dimensions.width.inches}&quot; ({widthCm} cm)
                 </p>
               </div>
               <div className="p-3 rounded-lg bg-stone-50">
                 <p className="text-stone-500 text-xs mb-1">{t(lang, 'editing.depth')}</p>
                 <p className="font-semibold text-stone-900">
-                  {furnitureData.dimensions.depth.feet}&apos; {furnitureData.dimensions.depth.inches}&quot; (
-                  {feetInchesToMeters(furnitureData.dimensions.depth.feet, furnitureData.dimensions.depth.inches)} m)
+                  {furnitureData.dimensions.depth.feet}&apos; {furnitureData.dimensions.depth.inches}&quot; ({depthCm} cm)
                 </p>
               </div>
               <div className="p-3 rounded-lg bg-stone-50">
                 <p className="text-stone-500 text-xs mb-1">{t(lang, 'editing.materials')}</p>
                 <p className="font-semibold text-stone-900">
-                  {furnitureData.materials.join(', ') || t(lang, 'complete.none')}
+                  {materials.length > 0
+                    ? materials.map((m) => m.material).join(', ')
+                    : t(lang, 'complete.none')}
                 </p>
               </div>
             </div>

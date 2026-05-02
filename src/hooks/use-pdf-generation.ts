@@ -17,6 +17,9 @@ export function usePdfGeneration() {
   const catalogImages = useAppStore((s) => s.catalogImages);
   const technicalDrawingBase64 = useAppStore((s) => s.technicalDrawingBase64);
   const setTechnicalDrawing = useAppStore((s) => s.setTechnicalDrawing);
+  const svgViews = useAppStore((s) => s.svgViews);
+  const setSvgViews = useAppStore((s) => s.setSvgViews);
+  const setApproved = useAppStore((s) => s.setApproved);
 
   const downloadPdf = useCallback((base64: string, filename: string) => {
     const byteCharacters = atob(base64);
@@ -64,7 +67,14 @@ export function usePdfGeneration() {
       clearTimeout(timeout);
       const data = await resp.json();
 
-      if (data.success && data.imageBase64) {
+      if (data.success && data.svgViews) {
+        setSvgViews(data.svgViews);
+        // Also store any legacy imageBase64 if present
+        if (data.imageBase64) {
+          setTechnicalDrawing(data.imageBase64);
+        }
+        return data.imageBase64 || null;
+      } else if (data.success && data.imageBase64) {
         setTechnicalDrawing(data.imageBase64);
         return data.imageBase64;
       } else {
@@ -74,7 +84,7 @@ export function usePdfGeneration() {
       console.warn('[pdf-client] Technical drawing generation error:', err);
       return null;
     }
-  }, [furnitureData, technicalDrawingBase64, setTechnicalDrawing]);
+  }, [furnitureData, technicalDrawingBase64, setTechnicalDrawing, setSvgViews]);
 
   const handleGeneratePDFs = useCallback(
     async (ultraCompressImage: () => Promise<string | null>) => {
@@ -83,8 +93,11 @@ export function usePdfGeneration() {
       try {
         const compressedImage = await ultraCompressImage();
 
-        // Step 1: Generate AI technical drawing
-        const techDrawing = await generateTechnicalDrawing();
+        // Step 1: Generate AI technical drawing (now returns svgViews)
+        await generateTechnicalDrawing();
+
+        // Get the latest svgViews from the store
+        const currentSvgViews = useAppStore.getState().svgViews;
 
         // Step 2: Generate metric PDF
         let metricResult: string | null = null;
@@ -99,7 +112,8 @@ export function usePdfGeneration() {
               furnitureData,
               imageBase64: compressedImage,
               unitSystem: 'metric',
-              technicalDrawingBase64: techDrawing,
+              technicalDrawingBase64: null,
+              svgViews: currentSvgViews,
             }),
             signal: metricController.signal,
           });
@@ -128,7 +142,8 @@ export function usePdfGeneration() {
               furnitureData,
               imageBase64: compressedImage,
               unitSystem: 'imperial',
-              technicalDrawingBase64: techDrawing,
+              technicalDrawingBase64: null,
+              svgViews: currentSvgViews,
             }),
             signal: imperialController.signal,
           });
@@ -146,7 +161,8 @@ export function usePdfGeneration() {
 
         if (metricResult || imperialResult) {
           toast.success(t(lang, 'toasts.pdfsGenerated'));
-          setState('complete');
+          // Transition to approving state instead of complete
+          setState('approving');
         } else {
           toast.error(t(lang, 'toasts.pdfsFailed'));
           setState('editing');
@@ -165,6 +181,7 @@ export function usePdfGeneration() {
       try {
         const compressedImage = await ultraCompressImage();
         const techDrawing = await generateTechnicalDrawing();
+        const currentSvgViews = useAppStore.getState().svgViews;
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 120000);
@@ -177,6 +194,7 @@ export function usePdfGeneration() {
             furnitureData,
             imageBase64: compressedImage,
             technicalDrawingBase64: techDrawing,
+            svgViews: currentSvgViews,
           }),
           signal: controller.signal,
         });
@@ -187,7 +205,7 @@ export function usePdfGeneration() {
         if (data.success && data.pdf) {
           setCombinedPdf(data.pdf);
           toast.success(t(lang, 'catalog.combinedPdf'));
-          setState('complete');
+          setState('approving');
         } else {
           toast.error(data.error || t(lang, 'toasts.pdfsFailed'));
           setState('editing');
@@ -228,7 +246,7 @@ export function usePdfGeneration() {
         if (data.success && data.pdf) {
           setCatalogPdf(data.pdf);
           toast.success(t(lang, 'catalog.catalogPdf'));
-          setState('complete');
+          setState('approving');
         } else {
           toast.error(data.error || t(lang, 'toasts.pdfsFailed'));
           setState('editing');
@@ -241,11 +259,60 @@ export function usePdfGeneration() {
     [catalogItems, catalogImages, furnitureData, lang, setState, setCatalogPdf]
   );
 
+  // Approve and save project to the API
+  const handleApproveAndSave = useCallback(async (): Promise<boolean> => {
+    setState('saving');
+    try {
+      const currentSvgViews = useAppStore.getState().svgViews;
+      const fd = useAppStore.getState().furnitureData;
+
+      const dimensionsCm = {
+        width: (fd.dimensions.width.feet * 12 + fd.dimensions.width.inches) * 2.54,
+        height: (fd.dimensions.height.feet * 12 + fd.dimensions.height.inches) * 2.54,
+        depth: (fd.dimensions.depth.feet * 12 + fd.dimensions.depth.inches) * 2.54,
+      };
+
+      const resp = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: fd.productName || 'Untitled Project',
+          furnitureType: fd.category || 'furniture',
+          description: fd.description || '',
+          observations: fd.observations || '',
+          dimensions: dimensionsCm,
+          shapeProfile: fd.shapeProfile,
+          materials: fd.materials,
+          svgViews: currentSvgViews,
+          unit: 'cm',
+        }),
+      });
+
+      const data = await resp.json();
+
+      if (data.success) {
+        setApproved(true);
+        toast.success(lang === 'en' ? 'Project saved successfully!' : '¡Proyecto guardado exitosamente!');
+        setState('complete');
+        return true;
+      } else {
+        toast.error(lang === 'en' ? 'Failed to save project' : 'Error al guardar el proyecto');
+        setState('approving');
+        return false;
+      }
+    } catch {
+      toast.error(lang === 'en' ? 'Failed to save project' : 'Error al guardar el proyecto');
+      setState('approving');
+      return false;
+    }
+  }, [lang, setState, setApproved]);
+
   return {
     downloadPdf,
     previewPdf,
     handleGeneratePDFs,
     handleGenerateCombined,
     handleGenerateCatalog,
+    handleApproveAndSave,
   };
 }
