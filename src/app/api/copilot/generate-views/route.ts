@@ -3,6 +3,7 @@ import ZAI from 'z-ai-web-dev-sdk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { isAzureConfigured, azureGenerateImage } from '@/lib/azure-openai';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -94,24 +95,6 @@ Colors: Primary ${colorPalette.primary}, Secondary ${colorPalette.secondary}
 Style: Photorealistic product photography on pearl gray background. Architectural precision. Balanced studio lighting. Professional typography. Include dimension lines in centimeters with arrows. Include annotation callouts for material, joinery, and functional highlights. Include color palette strip at bottom showing: ${colorPalette.primary} (material), ${colorPalette.secondary} (feature), #E5E5E5 (pearl gray), #4A4A4A (dark gray). Include ${brand} logo header at top. High resolution, print-quality rendering.`;
 }
 
-async function generateViewImage(zai: ZAI.ZAI, view: string, data: FurnitureInfo): Promise<string | null> {
-  const prompt = buildViewPrompt(view, data);
-  try {
-    const response = await withTimeout(
-      zai.images.generations.create({
-        prompt,
-        size: '1024x1024',
-      }),
-      45_000,
-      `Image generation (${view})`
-    );
-    return response.data?.[0]?.base64 || null;
-  } catch (err) {
-    console.warn(`[copilot-views] Failed to generate ${view} view:`, err instanceof Error ? err.message : String(err));
-    return null;
-  }
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -122,18 +105,59 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No furniture data provided' }, { status: 400 });
     }
 
-    const configReady = await ensureZAIConfig();
-    if (!configReady) {
-      return NextResponse.json({ error: 'AI image generation not available' }, { status: 503 });
-    }
-
-    const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
     const results: Record<string, string | null> = {};
+    const useAzure = isAzureConfigured();
+    const useZai = await ensureZAIConfig();
+
+    if (!useAzure && !useZai) {
+      return NextResponse.json({ error: 'No AI image generation providers configured. Set AZURE_OPENAI_API_KEY or ZAI_BASE_URL.' }, { status: 503 });
+    }
 
     // Generate views sequentially to avoid rate limits
     for (const view of views) {
+      const prompt = buildViewPrompt(view, furnitureData);
       console.log(`[copilot-views] Generating ${view} view...`);
-      const imageBase64 = await generateViewImage(zai, view, furnitureData);
+
+      let imageBase64: string | null = null;
+
+      // ── Provider 1: Azure OpenAI DALL-E 3 (PRIMARY) ──
+      if (useAzure) {
+        try {
+          const result = await withTimeout(
+            azureGenerateImage(prompt, '1024x1024', 'hd'),
+            60_000,
+            `Azure DALL-E 3 (${view})`
+          );
+          if (result.success && result.base64) {
+            imageBase64 = result.base64;
+            console.log(`[copilot-views] ✅ Azure DALL-E 3 generated ${view} view`);
+          }
+        } catch (err) {
+          console.warn(`[copilot-views] Azure DALL-E 3 failed for ${view}:`, err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      // ── Provider 2: Z-AI Image Generation (FALLBACK) ──
+      if (!imageBase64 && useZai) {
+        try {
+          const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
+          const response = await withTimeout(
+            zai.images.generations.create({
+              prompt,
+              size: '1024x1024',
+            }),
+            45_000,
+            `Z-AI Image (${view})`
+          );
+          imageBase64 = response.data?.[0]?.base64 || null;
+          if (imageBase64) {
+            console.log(`[copilot-views] Z-AI generated ${view} view`);
+          }
+        } catch (err) {
+          console.warn(`[copilot-views] Z-AI image generation failed for ${view}:`, err instanceof Error ? err.message : String(err));
+        }
+      }
+
       results[view] = imageBase64;
     }
 

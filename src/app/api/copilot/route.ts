@@ -3,6 +3,7 @@ import ZAI from 'z-ai-web-dev-sdk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { isAzureConfigured, azureVisionChat, azureChat } from '@/lib/azure-openai';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -59,7 +60,6 @@ async function ensureZAIConfig(): Promise<boolean> {
     '/etc/.z-ai-config',
     '/tmp/.z-ai-config',
   ];
-
   for (const p of configPaths) {
     try {
       const content = fs.readFileSync(p, 'utf-8');
@@ -70,29 +70,21 @@ async function ensureZAIConfig(): Promise<boolean> {
       }
     } catch { /* ignore */ }
   }
-
   const baseUrl = process.env.ZAI_BASE_URL;
   const apiKey = process.env.ZAI_API_KEY;
   if (!baseUrl || !apiKey) return false;
   if (isVercel() && baseUrl.includes('172.')) return false;
 
   const configData = JSON.stringify({
-    baseUrl,
-    apiKey,
+    baseUrl, apiKey,
     chatId: process.env.ZAI_CHAT_ID,
     token: process.env.ZAI_TOKEN,
     userId: process.env.ZAI_USER_ID,
   }, null, 2);
 
-  const writePaths = isVercel()
-    ? ['/tmp/.z-ai-config']
-    : [path.join(process.cwd(), '.z-ai-config'), '/tmp/.z-ai-config'];
-
+  const writePaths = isVercel() ? ['/tmp/.z-ai-config'] : [path.join(process.cwd(), '.z-ai-config'), '/tmp/.z-ai-config'];
   for (const writePath of writePaths) {
-    try {
-      fs.writeFileSync(writePath, configData);
-      return true;
-    } catch { /* ignore */ }
+    try { fs.writeFileSync(writePath, configData); return true; } catch { /* ignore */ }
   }
   return true;
 }
@@ -213,9 +205,37 @@ export async function POST(req: NextRequest) {
     base64 = compressed.base64;
     mimeType = compressed.mimeType;
 
-    // Try Z-AI Vision
-    const configReady = await ensureZAIConfig();
-    if (configReady) {
+    // ── Provider 1: Microsoft Azure OpenAI (GPT-4o Vision) — PRIMARY ──
+    if (isAzureConfigured()) {
+      console.log(`[copilot] Trying Microsoft Azure OpenAI (GPT-4o Vision)...`);
+      try {
+        const result = await withTimeout(
+          azureVisionChat(COPILOT_ANALYSIS_PROMPT, base64, mimeType, { temperature: 0.2, maxTokens: 4000 }),
+          PROVIDER_TIMEOUT,
+          'Azure OpenAI Vision'
+        );
+
+        if (result.success && result.content) {
+          const parsed = parseAIResponse(result.content);
+          if ('parsed' in parsed) {
+            console.log(`[copilot] ✅ Azure OpenAI analysis success, elapsed: ${Date.now() - startTime}ms`);
+            return NextResponse.json({
+              success: true,
+              data: parsed.parsed,
+              provider: 'Microsoft Azure OpenAI (GPT-4o Vision)',
+            });
+          }
+          console.warn('[copilot] Azure OpenAI response parse failed, trying fallback...');
+        }
+      } catch (err) {
+        console.warn('[copilot] Azure OpenAI failed:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // ── Provider 2: Z-AI Vision — FALLBACK ──
+    const zaiConfigReady = await ensureZAIConfig();
+    if (zaiConfigReady) {
+      console.log(`[copilot] Trying Z-AI provider...`);
       try {
         const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
         const imageUrl = `data:${mimeType};base64,${base64}`;
@@ -233,7 +253,7 @@ export async function POST(req: NextRequest) {
             stream: false,
           }),
           PROVIDER_TIMEOUT,
-          'Z-AI Vision (Copilot)'
+          'Z-AI Vision'
         );
 
         const content = response.choices?.[0]?.message?.content || '';
@@ -245,13 +265,14 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        console.warn('[copilot] Z-AI vision failed:', err instanceof Error ? err.message : String(err));
+        console.warn('[copilot] Z-AI failed:', err instanceof Error ? err.message : String(err));
       }
     }
 
-    // Try Gemini fallback
+    // ── Provider 3: Gemini — FALLBACK ──
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
+      console.log(`[copilot] Trying Gemini provider...`);
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT);
@@ -286,39 +307,40 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        console.warn('[copilot] Gemini fallback failed:', err instanceof Error ? err.message : String(err));
+        console.warn('[copilot] Gemini failed:', err instanceof Error ? err.message : String(err));
       }
     }
 
-    // Fallback: chat-only analysis without image
-    if (configReady) {
+    // ── Provider 4: Azure OpenAI Chat (no vision) — TEXT FALLBACK ──
+    if (isAzureConfigured()) {
+      console.log(`[copilot] Trying Azure OpenAI chat (no vision)...`);
       try {
-        const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
-        const response = await withTimeout(
-          zai.chat.completions.create({
-            messages: [{
-              role: 'user',
-              content: COPILOT_ANALYSIS_PROMPT + '\n\n[Note: Image could not be processed via vision API. Provide a generic furniture analysis for a modern wooden chair with cane seat as the most likely type.]',
-            }],
-            stream: false,
-          }),
+        const result = await withTimeout(
+          azureChat(
+            COPILOT_ANALYSIS_PROMPT + '\n\n[Note: Image could not be processed via vision API. Provide a generic furniture analysis for a modern wooden chair with cane seat as the most likely type.]',
+            { temperature: 0.3 }
+          ),
           PROVIDER_TIMEOUT,
-          'Z-AI Chat (Copilot fallback)'
+          'Azure OpenAI Chat'
         );
 
-        const content = response.choices?.[0]?.message?.content || '';
-        if (content && content.length > 10) {
-          const parsed = parseAIResponse(content);
+        if (result.success && result.content) {
+          const parsed = parseAIResponse(result.content);
           if ('parsed' in parsed) {
-            return NextResponse.json({ success: true, data: parsed.parsed, provider: 'Z-AI (Chat Fallback)', isEstimated: true });
+            return NextResponse.json({
+              success: true,
+              data: parsed.parsed,
+              provider: 'Microsoft Azure OpenAI (Chat)',
+              isEstimated: true,
+            });
           }
         }
       } catch (err) {
-        console.warn('[copilot] Z-AI chat fallback failed:', err instanceof Error ? err.message : String(err));
+        console.warn('[copilot] Azure OpenAI chat failed:', err instanceof Error ? err.message : String(err));
       }
     }
 
-    // Ultimate fallback with smart defaults
+    // ── Ultimate fallback with smart defaults ──
     const fallbackData = {
       productType: 'chair',
       style: 'modern',
@@ -342,7 +364,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('[copilot] Unexpected error:', error);
-    const msg = error instanceof Error ? error.message : String(error);
 
     const fallbackData = {
       productType: 'chair',
@@ -364,7 +385,7 @@ export async function POST(req: NextRequest) {
       provider: 'Smart Defaults (error)',
       isEstimated: true,
       warning: 'An error occurred. Showing estimated data — please verify.',
-      originalError: msg,
+      originalError: error instanceof Error ? error.message : String(error),
     });
   }
 }

@@ -50,20 +50,20 @@ export function AppHeader({
         <div className="flex items-center gap-2">
           {actions}
 
-          {/* Copilot Toggle Button */}
+          {/* Microsoft Copilot Toggle */}
           {onToggleCopilot && (
             <Button
-              variant={copilotOpen ? 'default' : 'outline'}
+              variant="ghost"
               size="sm"
               onClick={onToggleCopilot}
               className={copilotOpen
-                ? 'bg-amber-800 hover:bg-amber-900 text-white gap-1'
-                : 'border-amber-300 text-amber-800 hover:bg-amber-50 gap-1'
+                ? 'bg-gradient-to-r from-blue-600 via-purple-600 to-pink-500 text-white hover:opacity-90 gap-1.5 rounded-lg shadow-md'
+                : 'hover:bg-gray-100 gap-1.5 rounded-lg text-gray-600'
               }
             >
               <Sparkles className="w-4 h-4" />
-              <span className="hidden sm:inline">
-                {lang === 'en' ? 'Copilot' : 'Copilot'}
+              <span className="hidden sm:inline text-xs font-medium">
+                Copilot
               </span>
             </Button>
           )}
