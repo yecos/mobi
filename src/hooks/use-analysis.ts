@@ -58,10 +58,13 @@ export function useAnalysis() {
           description: data.data.description || '',
           descriptionEs: data.data.descriptionEs || '',
           category: data.data.category || 'sofa',
-          materials: data.data.materials || [],
+          materials: Array.isArray(data.data.materials) ? data.data.materials.map((m: unknown) =>
+            typeof m === 'string' ? { material: m, quantity: 1, description: '', observations: '' } : m
+          ) : [],
           colorFinishes: data.data.colorFinishes || [],
           loungeConfigurations: data.data.loungeConfigurations || [],
           tags: data.data.tags || [],
+          observations: data.data.observations || '',
           dimensions: {
             ...useAppStore.getState().furnitureData.dimensions,
             ...normalizeDimensions(data.data.dimensions),

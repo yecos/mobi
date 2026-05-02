@@ -71,11 +71,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       svgViews: {
-        plant: result.plant,
-        frontal: result.frontal,
-        lateral: result.lateral,
+        plant: result.plantView.svgContent,
+        frontal: result.frontalView.svgContent,
+        lateral: result.lateralView.svgContent,
       },
-      scale,
+      scale: result.scale,
     });
   } catch (error) {
     console.error('[generate-drawing] Error:', error);

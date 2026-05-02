@@ -128,24 +128,49 @@ async function tryZAI(base64: string, mimeType: string): Promise<ProviderResult>
     const zai = await ZAI.create();
     const imageUrl = `data:${mimeType};base64,${base64}`;
 
-    const response = await zai.chat.completions.createVision({
-      model: 'glm-4v-plus',
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: PROMPT_TEXT },
-          { type: 'image_url', image_url: { url: imageUrl } },
-        ],
-      }],
-      stream: false,
-    });
+    // Try vision API first
+    try {
+      const response = await zai.chat.completions.createVision({
+        model: 'glm-4v-plus',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: PROMPT_TEXT },
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ],
+        }],
+        stream: false,
+      });
 
-    const content = response.choices?.[0]?.message?.content || '';
-    if (!content || content.length < 10) {
-      return { success: false, error: 'Z-AI returned empty response' };
+      const content = response.choices?.[0]?.message?.content || '';
+      if (content && content.length > 10) {
+        return { success: true, data: content, provider: 'Z-AI (GLM-4V Plus)' };
+      }
+    } catch (visionErr) {
+      console.warn('[analyze] Z-AI vision failed, trying chat API:', visionErr instanceof Error ? visionErr.message : String(visionErr));
     }
 
-    return { success: true, data: content, provider: 'Z-AI (GLM-4V Plus)' };
+    // Fallback: try regular chat API (if vision is not available)
+    try {
+      const response = await zai.chat.completions.create({
+        messages: [
+          {
+            role: 'user',
+            content: PROMPT_TEXT + '\n\n[Note: Image could not be processed via vision API. Provide generic furniture estimates based on common dimensions.]',
+          },
+        ],
+        stream: false,
+      });
+
+      const content = response.choices?.[0]?.message?.content || '';
+      if (content && content.length > 10) {
+        return { success: true, data: content, provider: 'Z-AI (Chat Fallback)' };
+      }
+    } catch (chatErr) {
+      console.warn('[analyze] Z-AI chat fallback also failed:', chatErr instanceof Error ? chatErr.message : String(chatErr));
+    }
+
+    return { success: false, error: 'Z-AI returned empty response from all methods' };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Z-AI failed: ${msg}` };
@@ -176,12 +201,16 @@ async function tryGemini(base64: string, mimeType: string, retryCount = 0): Prom
     );
 
     if (!response.ok) {
-      if (response.status === 429 && retryCount < 2) {
-        const delay = Math.pow(2, retryCount) * 3000;
+      if (response.status === 429 && retryCount < 3) {
+        // Exponential backoff: 5s, 15s, 30s
+        const delay = Math.pow(3, retryCount) * 5000;
+        console.warn(`[analyze] Gemini 429 rate limit, retrying in ${delay / 1000}s (attempt ${retryCount + 1}/3)`);
         await new Promise((r) => setTimeout(r, delay));
         return tryGemini(base64, mimeType, retryCount + 1);
       }
-      return { success: false, error: `Gemini ${response.status}` };
+      const errorBody = await response.text().catch(() => '');
+      console.error(`[analyze] Gemini ${response.status}:`, errorBody.substring(0, 200));
+      return { success: false, error: `Gemini ${response.status}: ${errorBody.substring(0, 100) || 'Unknown error'}` };
     }
 
     const data = await response.json();
