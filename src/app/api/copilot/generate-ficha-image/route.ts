@@ -3,6 +3,7 @@ import ZAI from 'z-ai-web-dev-sdk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { isOpenAIConfigured, openaiVisionChat, openaiGenerateImage } from '@/lib/openai-provider';
 import { isAzureConfigured, azureGenerateImage } from '@/lib/azure-openai';
 
 export const dynamic = 'force-dynamic';
@@ -151,8 +152,52 @@ export async function POST(req: NextRequest) {
     const prompt = buildFichaImagePrompt(furnitureData);
     let imageBase64: string | null = null;
 
-    // ── Strategy 1: Use Z-AI Vision to generate ficha image WITH the original furniture photo ──
-    // This mirrors the ChatGPT experience: send image + prompt → get ficha image
+    // ── Strategy 1: OpenAI (ChatGPT) — PRIMARY ──
+    // Uses GPT-4o Vision to enhance prompt with furniture photo details, then DALL-E 3 to generate
+    if (isOpenAIConfigured()) {
+      console.log('[copilot-ficha-image] Generating ficha image with OpenAI (ChatGPT)...');
+      try {
+        let enhancedPrompt = prompt;
+
+        // If we have the original image, use GPT-4o Vision to enhance the prompt
+        if (originalImageBase64) {
+          console.log('[copilot-ficha-image] Enhancing prompt with GPT-4o Vision...');
+          const visionResult = await withTimeout(
+            openaiVisionChat(
+              `Look at this furniture image carefully. I need you to enhance this product sheet generation prompt with specific visual details you can see in the image (exact color tones, texture descriptions, shape details, material appearance). Return ONLY the enhanced prompt text, nothing else:\n\n${prompt}`,
+              originalImageBase64.startsWith('data:') ? originalImageBase64.split(',')[1] : originalImageBase64,
+              'image/jpeg',
+              { temperature: 0.3, maxTokens: 2000 }
+            ),
+            30_000,
+            'OpenAI Vision Enhancement'
+          );
+          if (visionResult.success && visionResult.content) {
+            enhancedPrompt = visionResult.content;
+            console.log('[copilot-ficha-image] Prompt enhanced with GPT-4o Vision');
+          }
+        }
+
+        // Generate the ficha image with DALL-E 3
+        const dalleResult = await withTimeout(
+          openaiGenerateImage(
+            enhancedPrompt.length > 3000 ? enhancedPrompt.substring(0, 3000) : enhancedPrompt,
+            '1024x1792',
+            'hd'
+          ),
+          90_000,
+          'OpenAI DALL-E 3 Ficha Image'
+        );
+        if (dalleResult.success && dalleResult.base64) {
+          imageBase64 = dalleResult.base64;
+          console.log('[copilot-ficha-image] ✅ OpenAI (ChatGPT + DALL-E 3) ficha image generated');
+        }
+      } catch (err) {
+        console.warn('[copilot-ficha-image] OpenAI failed:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // ── Strategy 2: Z-AI Vision + Image Generation — FALLBACK ──
     const useZai = await ensureZAIConfig();
     if (useZai && originalImageBase64) {
       console.log('[copilot-ficha-image] Generating ficha image with Z-AI Vision (image reference)...');

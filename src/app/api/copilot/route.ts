@@ -3,6 +3,7 @@ import ZAI from 'z-ai-web-dev-sdk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { isOpenAIConfigured, openaiVisionChat, openaiChat } from '@/lib/openai-provider';
 import { isAzureConfigured, azureVisionChat, azureChat } from '@/lib/azure-openai';
 
 export const dynamic = 'force-dynamic';
@@ -224,8 +225,34 @@ export async function POST(req: NextRequest) {
     base64 = compressed.base64;
     mimeType = compressed.mimeType;
 
-    // ── Provider 1: Z-AI Vision (GLM-4V Plus) — PRIMARY ──
-    // Works immediately without any Azure configuration
+    // ── Provider 1: OpenAI (ChatGPT GPT-4o Vision) — PRIMARY ──
+    if (isOpenAIConfigured()) {
+      console.log(`[copilot] Trying OpenAI (ChatGPT GPT-4o Vision)...`);
+      try {
+        const result = await withTimeout(
+          openaiVisionChat(COPILOT_ANALYSIS_PROMPT, base64, mimeType, { temperature: 0.2, maxTokens: 4000 }),
+          PROVIDER_TIMEOUT,
+          'OpenAI Vision'
+        );
+
+        if (result.success && result.content) {
+          const parsed = parseAIResponse(result.content);
+          if ('parsed' in parsed) {
+            console.log(`[copilot] ✅ OpenAI (ChatGPT) analysis success, elapsed: ${Date.now() - startTime}ms`);
+            return NextResponse.json({
+              success: true,
+              data: parsed.parsed,
+              provider: 'OpenAI (ChatGPT GPT-4o Vision)',
+            });
+          }
+          console.warn('[copilot] OpenAI response parse failed, trying fallback...');
+        }
+      } catch (err) {
+        console.warn('[copilot] OpenAI failed:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // ── Provider 2: Z-AI Vision (GLM-4V Plus) — FALLBACK ──
     const zaiConfigReady = await ensureZAIConfig();
     if (zaiConfigReady) {
       console.log(`[copilot] Trying Z-AI (GLM-4V Plus)...`);
@@ -262,7 +289,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Provider 2: Microsoft Azure OpenAI (GPT-4o Vision) — OPTIONAL ──
+    // ── Provider 3: Microsoft Azure OpenAI (GPT-4o Vision) — OPTIONAL ──
     if (isAzureConfigured()) {
       console.log(`[copilot] Trying Microsoft Azure OpenAI (GPT-4o Vision)...`);
       try {
@@ -289,7 +316,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Provider 3: Gemini — FALLBACK ──
+    // ── Provider 4: Gemini — FALLBACK ──
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       console.log(`[copilot] Trying Gemini provider...`);
@@ -331,7 +358,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Provider 4: Azure OpenAI Chat (no vision) — TEXT FALLBACK ──
+    // ── Provider 5: Azure OpenAI Chat (no vision) — TEXT FALLBACK ──
     if (isAzureConfigured()) {
       console.log(`[copilot] Trying Azure OpenAI chat (no vision)...`);
       try {
