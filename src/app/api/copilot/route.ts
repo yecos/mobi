@@ -67,6 +67,10 @@ async function ensureZAIConfig(): Promise<boolean> {
       const config = JSON.parse(content);
       if (config.baseUrl && config.apiKey) {
         if (isVercel() && config.baseUrl.includes('172.')) continue;
+        // Also write to /tmp for Z-AI SDK auto-discovery
+        if (p !== '/tmp/.z-ai-config') {
+          try { fs.writeFileSync('/tmp/.z-ai-config', content); } catch { /* ignore */ }
+        }
         return true;
       }
     } catch { /* ignore */ }
@@ -227,7 +231,7 @@ export async function POST(req: NextRequest) {
 
     // ── Provider 1: OpenAI (ChatGPT GPT-4o Vision) — PRIMARY ──
     if (isOpenAIConfigured()) {
-      console.log(`[copilot] Trying OpenAI (ChatGPT GPT-4o Vision)...`);
+      console.log(`[copilot] 🤖 Trying OpenAI (ChatGPT GPT-4o Vision)...`);
       try {
         const result = await withTimeout(
           openaiVisionChat(COPILOT_ANALYSIS_PROMPT, base64, mimeType, { temperature: 0.2, maxTokens: 4000 }),
@@ -250,12 +254,14 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.warn('[copilot] OpenAI failed:', err instanceof Error ? err.message : String(err));
       }
+    } else {
+      console.log('[copilot] ⏭️ OpenAI not configured (no valid API key), skipping');
     }
 
     // ── Provider 2: Z-AI Vision (GLM-4V Plus) — FALLBACK ──
     const zaiConfigReady = await ensureZAIConfig();
     if (zaiConfigReady) {
-      console.log(`[copilot] Trying Z-AI (GLM-4V Plus)...`);
+      console.log(`[copilot] 🤖 Trying Z-AI (GLM-4V Plus)...`);
       try {
         const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
         const imageUrl = `data:${mimeType};base64,${base64}`;
@@ -291,7 +297,7 @@ export async function POST(req: NextRequest) {
 
     // ── Provider 3: Microsoft Azure OpenAI (GPT-4o Vision) — OPTIONAL ──
     if (isAzureConfigured()) {
-      console.log(`[copilot] Trying Microsoft Azure OpenAI (GPT-4o Vision)...`);
+      console.log(`[copilot] 🤖 Trying Microsoft Azure OpenAI (GPT-4o Vision)...`);
       try {
         const result = await withTimeout(
           azureVisionChat(COPILOT_ANALYSIS_PROMPT, base64, mimeType, { temperature: 0.2, maxTokens: 4000 }),
@@ -319,7 +325,7 @@ export async function POST(req: NextRequest) {
     // ── Provider 4: Gemini — FALLBACK ──
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      console.log(`[copilot] Trying Gemini provider...`);
+      console.log(`[copilot] 🤖 Trying Gemini provider...`);
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT);
@@ -348,7 +354,7 @@ export async function POST(req: NextRequest) {
           if (content && content.length > 10) {
             const parsed = parseAIResponse(content);
             if ('parsed' in parsed) {
-              console.log(`[copilot] Gemini analysis success, elapsed: ${Date.now() - startTime}ms`);
+              console.log(`[copilot] ✅ Gemini analysis success, elapsed: ${Date.now() - startTime}ms`);
               return NextResponse.json({ success: true, data: parsed.parsed, provider: 'Gemini 2.0 Flash' });
             }
           }
@@ -360,7 +366,7 @@ export async function POST(req: NextRequest) {
 
     // ── Provider 5: Azure OpenAI Chat (no vision) — TEXT FALLBACK ──
     if (isAzureConfigured()) {
-      console.log(`[copilot] Trying Azure OpenAI chat (no vision)...`);
+      console.log(`[copilot] 🤖 Trying Azure OpenAI chat (no vision)...`);
       try {
         const result = await withTimeout(
           azureChat(
@@ -386,6 +392,8 @@ export async function POST(req: NextRequest) {
         console.warn('[copilot] Azure OpenAI chat failed:', err instanceof Error ? err.message : String(err));
       }
     }
+
+    console.error(`[copilot] ❌ All AI providers failed after ${Date.now() - startTime}ms, using smart defaults`);
 
     // ── Ultimate fallback with smart defaults ──
     const fallbackData = {

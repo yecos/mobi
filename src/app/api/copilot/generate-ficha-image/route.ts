@@ -24,6 +24,7 @@ function isVercel(): boolean {
 }
 
 async function ensureZAIConfig(): Promise<boolean> {
+  // First check existing config files
   const configPaths = [
     path.join(process.cwd(), '.z-ai-config'),
     path.join(os.homedir(), '.z-ai-config'),
@@ -36,10 +37,16 @@ async function ensureZAIConfig(): Promise<boolean> {
       const config = JSON.parse(content);
       if (config.baseUrl && config.apiKey) {
         if (isVercel() && config.baseUrl.includes('172.')) continue;
+        // Also write to /tmp for Z-AI SDK auto-discovery
+        if (p !== '/tmp/.z-ai-config') {
+          try { fs.writeFileSync('/tmp/.z-ai-config', content); } catch { /* ignore */ }
+        }
         return true;
       }
     } catch { /* ignore */ }
   }
+
+  // Try from env vars
   const baseUrl = process.env.ZAI_BASE_URL;
   const apiKey = process.env.ZAI_API_KEY;
   if (!baseUrl || !apiKey) return false;
@@ -136,10 +143,11 @@ STYLE: Photorealistic quality, architectural precision, balanced studio lighting
 
 /**
  * Generate a photorealistic VIVA MOBILI product sheet image using AI.
- * Uses the same prompt structure that the user uses in ChatGPT for consistent results.
- * Now accepts the original furniture image to use as reference via vision-to-image generation.
+ * Provider priority: OpenAI (ChatGPT + DALL-E 3) → Z-AI (GLM + Image Gen) → Azure DALL-E 3
  */
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+
   try {
     const body = await req.json();
     const furnitureData = body.furnitureData as FurnitureInfo;
@@ -151,30 +159,34 @@ export async function POST(req: NextRequest) {
 
     const prompt = buildFichaImagePrompt(furnitureData);
     let imageBase64: string | null = null;
+    let usedProvider = 'none';
 
-    // ── Strategy 1: OpenAI (ChatGPT) — PRIMARY ──
-    // Uses GPT-4o Vision to enhance prompt with furniture photo details, then DALL-E 3 to generate
+    // ── Strategy 1: OpenAI (ChatGPT GPT-4o + DALL-E 3) — PRIMARY ──
     if (isOpenAIConfigured()) {
-      console.log('[copilot-ficha-image] Generating ficha image with OpenAI (ChatGPT)...');
+      console.log('[copilot-ficha-image] 🤖 Trying OpenAI (ChatGPT + DALL-E 3)...');
       try {
         let enhancedPrompt = prompt;
 
         // If we have the original image, use GPT-4o Vision to enhance the prompt
         if (originalImageBase64) {
           console.log('[copilot-ficha-image] Enhancing prompt with GPT-4o Vision...');
-          const visionResult = await withTimeout(
-            openaiVisionChat(
-              `Look at this furniture image carefully. I need you to enhance this product sheet generation prompt with specific visual details you can see in the image (exact color tones, texture descriptions, shape details, material appearance). Return ONLY the enhanced prompt text, nothing else:\n\n${prompt}`,
-              originalImageBase64.startsWith('data:') ? originalImageBase64.split(',')[1] : originalImageBase64,
-              'image/jpeg',
-              { temperature: 0.3, maxTokens: 2000 }
-            ),
-            30_000,
-            'OpenAI Vision Enhancement'
-          );
-          if (visionResult.success && visionResult.content) {
-            enhancedPrompt = visionResult.content;
-            console.log('[copilot-ficha-image] Prompt enhanced with GPT-4o Vision');
+          try {
+            const visionResult = await withTimeout(
+              openaiVisionChat(
+                `Look at this furniture image carefully. I need you to enhance this product sheet generation prompt with specific visual details you can see in the image (exact color tones, texture descriptions, shape details, material appearance). Return ONLY the enhanced prompt text, nothing else:\n\n${prompt}`,
+                originalImageBase64.startsWith('data:') ? originalImageBase64.split(',')[1] : originalImageBase64,
+                'image/jpeg',
+                { temperature: 0.3, maxTokens: 2000 }
+              ),
+              30_000,
+              'OpenAI Vision Enhancement'
+            );
+            if (visionResult.success && visionResult.content) {
+              enhancedPrompt = visionResult.content;
+              console.log('[copilot-ficha-image] Prompt enhanced with GPT-4o Vision');
+            }
+          } catch (visionErr) {
+            console.warn('[copilot-ficha-image] GPT-4o Vision enhancement failed, using base prompt:', visionErr instanceof Error ? visionErr.message : String(visionErr));
           }
         }
 
@@ -190,90 +202,116 @@ export async function POST(req: NextRequest) {
         );
         if (dalleResult.success && dalleResult.base64) {
           imageBase64 = dalleResult.base64;
-          console.log('[copilot-ficha-image] ✅ OpenAI (ChatGPT + DALL-E 3) ficha image generated');
+          usedProvider = 'OpenAI (ChatGPT + DALL-E 3)';
+          console.log(`[copilot-ficha-image] ✅ OpenAI ficha image generated in ${Date.now() - startTime}ms`);
         }
       } catch (err) {
         console.warn('[copilot-ficha-image] OpenAI failed:', err instanceof Error ? err.message : String(err));
       }
+    } else {
+      console.log('[copilot-ficha-image] ⏭️ OpenAI not configured (no valid API key), skipping');
     }
 
     // ── Strategy 2: Z-AI Vision + Image Generation — FALLBACK ──
-    const useZai = await ensureZAIConfig();
-    if (useZai && originalImageBase64) {
-      console.log('[copilot-ficha-image] Generating ficha image with Z-AI Vision (image reference)...');
-      try {
-        const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
+    if (!imageBase64) {
+      const zaiReady = await ensureZAIConfig();
+      if (zaiReady) {
+        console.log('[copilot-ficha-image] 🤖 Trying Z-AI (GLM-4V + Image Gen)...');
+        try {
+          const zai = await withTimeout(ZAI.create(), 10_000, 'Z-AI init');
 
-        // Use vision chat to understand the furniture, then generate image
-        // First: ask vision model to enhance the prompt based on the actual furniture photo
-        const visionResponse = await withTimeout(
-          zai.chat.completions.create({
-            model: 'glm-4v-plus',
-            messages: [{
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: `Look at this furniture image carefully. I need you to enhance this product sheet generation prompt with specific visual details you can see in the image (exact color tones, texture descriptions, shape details, material appearance). Return ONLY the enhanced prompt text, nothing else:\n\n${prompt}`,
-                },
-                {
-                  type: 'image_url',
-                  image_url: { url: originalImageBase64.startsWith('data:') ? originalImageBase64 : `data:image/jpeg;base64,${originalImageBase64}` },
-                },
-              ],
-            }],
-            stream: false,
-          }),
-          30_000,
-          'Z-AI Vision Enhancement'
-        );
+          // First: Try with vision-enhanced prompt if we have the original image
+          let enhancedPrompt = prompt;
+          if (originalImageBase64) {
+            console.log('[copilot-ficha-image] Enhancing prompt with Z-AI Vision (GLM-4V)...');
+            try {
+              const visionResponse = await withTimeout(
+                zai.chat.completions.create({
+                  model: 'glm-4v-plus',
+                  messages: [{
+                    role: 'user',
+                    content: [
+                      {
+                        type: 'text',
+                        text: `Look at this furniture image carefully. I need you to enhance this product sheet generation prompt with specific visual details you can see in the image (exact color tones, texture descriptions, shape details, material appearance). Return ONLY the enhanced prompt text, nothing else:\n\n${prompt}`,
+                      },
+                      {
+                        type: 'image_url',
+                        image_url: { url: originalImageBase64.startsWith('data:') ? originalImageBase64 : `data:image/jpeg;base64,${originalImageBase64}` },
+                      },
+                    ],
+                  }],
+                  stream: false,
+                }),
+                30_000,
+                'Z-AI Vision Enhancement'
+              );
 
-        const enhancedPrompt = visionResponse.choices?.[0]?.message?.content || prompt;
-        console.log('[copilot-ficha-image] Prompt enhanced with furniture visual details');
+              const visionContent = visionResponse.choices?.[0]?.message?.content;
+              if (visionContent && visionContent.length > 50) {
+                enhancedPrompt = visionContent;
+                console.log('[copilot-ficha-image] Prompt enhanced with Z-AI Vision');
+              }
+            } catch (visionErr) {
+              console.warn('[copilot-ficha-image] Z-AI Vision enhancement failed, using base prompt:', visionErr instanceof Error ? visionErr.message : String(visionErr));
+            }
+          }
 
-        // Now generate the image with the enhanced prompt
-        const imageResponse = await withTimeout(
-          zai.images.generations.create({
-            prompt: enhancedPrompt.length > 3000 ? enhancedPrompt.substring(0, 3000) : enhancedPrompt,
-            size: '768x1344',
-          }),
-          60_000,
-          'Z-AI Ficha Image (Enhanced)'
-        );
-        imageBase64 = imageResponse.data?.[0]?.base64 || null;
-        if (imageBase64) {
-          console.log('[copilot-ficha-image] ✅ Z-AI ficha image generated with furniture reference');
+          // Generate the ficha image with Z-AI
+          try {
+            const imageResponse = await withTimeout(
+              zai.images.generations.create({
+                prompt: enhancedPrompt.length > 3000 ? enhancedPrompt.substring(0, 3000) : enhancedPrompt,
+                size: '768x1344',
+              }),
+              60_000,
+              'Z-AI Ficha Image (Enhanced)'
+            );
+            imageBase64 = imageResponse.data?.[0]?.base64 || null;
+            if (imageBase64) {
+              usedProvider = 'Z-AI (GLM-4V + Image Gen)';
+              console.log(`[copilot-ficha-image] ✅ Z-AI ficha image generated (enhanced) in ${Date.now() - startTime}ms`);
+            }
+          } catch (imgErr) {
+            console.warn('[copilot-ficha-image] Z-AI image gen (enhanced) failed:', imgErr instanceof Error ? imgErr.message : String(imgErr));
+          }
+        } catch (zaiErr) {
+          console.warn('[copilot-ficha-image] Z-AI init failed:', zaiErr instanceof Error ? zaiErr.message : String(zaiErr));
         }
-      } catch (err) {
-        console.warn('[copilot-ficha-image] Z-AI Vision+Image failed:', err instanceof Error ? err.message : String(err));
+      } else {
+        console.log('[copilot-ficha-image] ⏭️ Z-AI not available');
       }
     }
 
-    // ── Strategy 2: Z-AI Image Generation (without furniture reference) ──
-    if (!imageBase64 && useZai) {
-      console.log('[copilot-ficha-image] Generating ficha image with Z-AI (text only)...');
-      try {
-        const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
-        const response = await withTimeout(
-          zai.images.generations.create({
-            prompt,
-            size: '768x1344',
-          }),
-          60_000,
-          'Z-AI Ficha Image'
-        );
-        imageBase64 = response.data?.[0]?.base64 || null;
-        if (imageBase64) {
-          console.log('[copilot-ficha-image] ✅ Z-AI ficha image generated');
+    // ── Strategy 3: Z-AI Image Generation (text-only prompt, no vision) ──
+    if (!imageBase64) {
+      const zaiReady = await ensureZAIConfig();
+      if (zaiReady) {
+        console.log('[copilot-ficha-image] 🤖 Trying Z-AI Image Gen (text-only prompt)...');
+        try {
+          const zai = await withTimeout(ZAI.create(), 10_000, 'Z-AI init');
+          const response = await withTimeout(
+            zai.images.generations.create({
+              prompt,
+              size: '768x1344',
+            }),
+            60_000,
+            'Z-AI Ficha Image (Text Only)'
+          );
+          imageBase64 = response.data?.[0]?.base64 || null;
+          if (imageBase64) {
+            usedProvider = 'Z-AI (Image Gen)';
+            console.log(`[copilot-ficha-image] ✅ Z-AI ficha image generated (text-only) in ${Date.now() - startTime}ms`);
+          }
+        } catch (err) {
+          console.warn('[copilot-ficha-image] Z-AI text-only image gen failed:', err instanceof Error ? err.message : String(err));
         }
-      } catch (err) {
-        console.warn('[copilot-ficha-image] Z-AI image gen failed:', err instanceof Error ? err.message : String(err));
       }
     }
 
-    // ── Provider 3: Azure OpenAI DALL-E 3 — OPTIONAL ──
+    // ── Strategy 4: Azure OpenAI DALL-E 3 — OPTIONAL ──
     if (!imageBase64 && isAzureConfigured()) {
-      console.log('[copilot-ficha-image] Trying Azure DALL-E 3...');
+      console.log('[copilot-ficha-image] 🤖 Trying Azure DALL-E 3...');
       try {
         const result = await withTimeout(
           azureGenerateImage(prompt, '1024x1792', 'hd'),
@@ -282,7 +320,8 @@ export async function POST(req: NextRequest) {
         );
         if (result.success && result.base64) {
           imageBase64 = result.base64;
-          console.log('[copilot-ficha-image] ✅ Azure DALL-E 3 ficha image generated');
+          usedProvider = 'Azure DALL-E 3';
+          console.log(`[copilot-ficha-image] ✅ Azure DALL-E 3 ficha image generated in ${Date.now() - startTime}ms`);
         }
       } catch (err) {
         console.warn('[copilot-ficha-image] Azure DALL-E 3 failed:', err instanceof Error ? err.message : String(err));
@@ -290,19 +329,25 @@ export async function POST(req: NextRequest) {
     }
 
     if (!imageBase64) {
+      console.error(`[copilot-ficha-image] ❌ All providers failed after ${Date.now() - startTime}ms`);
       return NextResponse.json({
         success: false,
-        error: 'Failed to generate ficha image — no AI image providers available',
+        error: 'Failed to generate ficha image — all AI image providers failed',
+        hint: isOpenAIConfigured()
+          ? 'OpenAI (ChatGPT) was tried but failed. Check your OPENAI_API_KEY.'
+          : 'No OpenAI API key configured. Add OPENAI_API_KEY=sk-... to .env for ChatGPT quality results.',
       }, { status: 503 });
     }
 
     return NextResponse.json({
       success: true,
       image: imageBase64,
+      provider: usedProvider,
     });
   } catch (error) {
-    console.error('[copilot-ficha-image] Error:', error);
+    console.error('[copilot-ficha-image] Unexpected error:', error);
     return NextResponse.json({
+      success: false,
       error: 'Failed to generate ficha image',
       details: error instanceof Error ? error.message : String(error),
     }, { status: 500 });

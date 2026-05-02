@@ -21,7 +21,14 @@ import OpenAI from 'openai';
 let _openaiClient: OpenAI | null = null;
 
 export function isOpenAIConfigured(): boolean {
-  return !!process.env.OPENAI_API_KEY;
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return false;
+  // Reject placeholder keys
+  const placeholders = ['your-openai-api-key-here', 'sk-your-key', 'xxx', 'placeholder', 'test'];
+  if (placeholders.includes(key.toLowerCase().trim())) return false;
+  // Must start with sk- or be a valid-looking key
+  if (!key.startsWith('sk-') && key.length < 20) return false;
+  return true;
 }
 
 export function getOpenAIClient(): OpenAI | null {

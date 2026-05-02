@@ -3,6 +3,7 @@ import ZAI from 'z-ai-web-dev-sdk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { isOpenAIConfigured, openaiGenerateImage } from '@/lib/openai-provider';
 import { isAzureConfigured, azureGenerateImage } from '@/lib/azure-openai';
 
 export const dynamic = 'force-dynamic';
@@ -35,6 +36,9 @@ async function ensureZAIConfig(): Promise<boolean> {
       const config = JSON.parse(content);
       if (config.baseUrl && config.apiKey) {
         if (isVercel() && config.baseUrl.includes('172.')) continue;
+        if (p !== '/tmp/.z-ai-config') {
+          try { fs.writeFileSync('/tmp/.z-ai-config', content); } catch { /* ignore */ }
+        }
         return true;
       }
     } catch { /* ignore */ }
@@ -106,12 +110,17 @@ export async function POST(req: NextRequest) {
     }
 
     const results: Record<string, string | null> = {};
+    const useOpenAI = isOpenAIConfigured();
     const useZai = await ensureZAIConfig();
     const useAzure = isAzureConfigured();
 
-    if (!useZai && !useAzure) {
-      return NextResponse.json({ error: 'No AI image generation providers configured. Z-AI should work by default.' }, { status: 503 });
+    if (!useOpenAI && !useZai && !useAzure) {
+      return NextResponse.json({
+        error: 'No AI image generation providers configured. Add OPENAI_API_KEY to .env for ChatGPT quality.',
+      }, { status: 503 });
     }
+
+    console.log(`[copilot-views] Providers available: OpenAI=${useOpenAI}, Z-AI=${useZai}, Azure=${useAzure}`);
 
     // Generate views sequentially to avoid rate limits
     for (const view of views) {
@@ -120,9 +129,25 @@ export async function POST(req: NextRequest) {
 
       let imageBase64: string | null = null;
 
-      // ── Provider 1: Z-AI Image Generation — PRIMARY ──
-      // Works immediately without any Azure configuration
-      if (useZai) {
+      // ── Provider 1: OpenAI (ChatGPT + DALL-E 3) — PRIMARY ──
+      if (useOpenAI) {
+        try {
+          const result = await withTimeout(
+            openaiGenerateImage(prompt, '1024x1024', 'hd'),
+            60_000,
+            `OpenAI DALL-E 3 (${view})`
+          );
+          if (result.success && result.base64) {
+            imageBase64 = result.base64;
+            console.log(`[copilot-views] ✅ OpenAI DALL-E 3 generated ${view} view`);
+          }
+        } catch (err) {
+          console.warn(`[copilot-views] OpenAI DALL-E 3 failed for ${view}:`, err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      // ── Provider 2: Z-AI Image Generation — FALLBACK ──
+      if (!imageBase64 && useZai) {
         try {
           const zai = await withTimeout(ZAI.create(), 8_000, 'Z-AI init');
           const response = await withTimeout(
@@ -142,7 +167,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // ── Provider 2: Azure OpenAI DALL-E 3 — OPTIONAL ──
+      // ── Provider 3: Azure OpenAI DALL-E 3 — OPTIONAL ──
       if (!imageBase64 && useAzure) {
         try {
           const result = await withTimeout(
