@@ -1,22 +1,27 @@
 /**
  * Microsoft Azure OpenAI Provider Configuration
- * 
+ *
  * Powers the VIVA MOBILI Copilot with Microsoft Copilot technology.
  * Uses Azure OpenAI Service (GPT-4o Vision + DALL-E 3).
- * 
+ *
  * Required environment variables:
  * - AZURE_OPENAI_API_KEY: Your Azure OpenAI resource key
  * - AZURE_OPENAI_ENDPOINT: e.g. https://your-resource.openai.azure.com
- * - AZURE_OPENAI_API_VERSION: e.g. 2024-08-01-preview
+ * - AZURE_OPENAI_API_VERSION: e.g. 2025-04-01-preview
  * - AZURE_OPENAI_DEPLOYMENT_NAME: GPT-4o deployment name (e.g. "gpt-4o")
  * - AZURE_OPENAI_VISION_DEPLOYMENT: GPT-4o vision deployment name (optional, defaults to DEPLOYMENT_NAME)
  * - AZURE_OPENAI_DALLE_DEPLOYMENT: DALL-E 3 deployment name (e.g. "dall-e-3")
+ *
+ * IMPORTANT: Use GPT-4o (not GPT-4 which was deprecated Nov 2025).
+ * Deploy these models in Azure AI Studio / Azure Portal:
+ *   1. gpt-4o   → for image analysis (vision)
+ *   2. dall-e-3 → for image generation
  */
 
-import OpenAI from 'openai';
+import { AzureOpenAI } from 'openai';
 
 // Azure OpenAI client singleton
-let _azureClient: OpenAI | null = null;
+let _azureClient: AzureOpenAI | null = null;
 
 export function isAzureConfigured(): boolean {
   return !!(
@@ -25,19 +30,18 @@ export function isAzureConfigured(): boolean {
   );
 }
 
-export function getAzureOpenAIClient(): OpenAI | null {
+export function getAzureOpenAIClient(): AzureOpenAI | null {
   if (!isAzureConfigured()) return null;
 
   if (!_azureClient) {
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT!.replace(/\/$/, '');
     const apiKey = process.env.AZURE_OPENAI_API_KEY!;
-    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview';
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2025-04-01-preview';
 
-    _azureClient = new OpenAI({
+    _azureClient = new AzureOpenAI({
       apiKey,
-      baseURL: `${endpoint}/openai/deployments?api-version=${apiVersion}`,
-      defaultQuery: { 'api-version': apiVersion },
-      defaultHeaders: { 'api-key': apiKey },
+      endpoint,
+      apiVersion,
     });
   }
 
@@ -58,6 +62,7 @@ export function getDalleDeployment(): string {
 
 /**
  * Call Azure OpenAI Chat/Vision completion
+ * Uses GPT-4o with vision capabilities to analyze furniture images
  */
 export async function azureVisionChat(
   prompt: string,
@@ -101,6 +106,7 @@ export async function azureVisionChat(
 
 /**
  * Call Azure OpenAI Chat completion (no image)
+ * Uses GPT-4o for text-only analysis as fallback
  */
 export async function azureChat(
   prompt: string,
@@ -134,6 +140,7 @@ export async function azureChat(
 
 /**
  * Generate image using Azure OpenAI DALL-E 3
+ * Creates photorealistic furniture views for the product sheet
  */
 export async function azureGenerateImage(
   prompt: string,
