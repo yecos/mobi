@@ -344,7 +344,9 @@ export async function POST(req: NextRequest) {
         troubleshooting.openai = 'Not configured. Add OPENAI_API_KEY=sk-... to environment variables';
       }
       if (isAzureConfigured()) {
-        troubleshooting.azure = `Configured (endpoint: ${process.env.AZURE_OPENAI_ENDPOINT}) but deployment not found. Current deployment names: chat="${process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o (default)'}", dalle="${process.env.AZURE_OPENAI_DALLE_DEPLOYMENT || 'dall-e-3 (default)'}". Check your deployment names in Azure Portal → Azure AI Studio.`;
+        const chatDeploy = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o (default)';
+        const dalleDeploy = process.env.AZURE_OPENAI_DALLE_DEPLOYMENT || 'dall-e-3 (default)';
+        troubleshooting.azure = `Configured (endpoint: ${process.env.AZURE_OPENAI_ENDPOINT}) but deployment not found. Current deployment names: chat="${chatDeploy}", dalle="${dalleDeploy}". Check your deployment names in Azure Portal.`;
       } else {
         troubleshooting.azure = 'Not configured. Add AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT';
       }
