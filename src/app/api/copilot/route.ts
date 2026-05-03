@@ -5,6 +5,7 @@ import path from 'path';
 import os from 'os';
 import { isOpenAIConfigured, openaiVisionChat, openaiChat } from '@/lib/openai-provider';
 import { isAzureConfigured, azureVisionChat, azureChat } from '@/lib/azure-openai';
+import { isGeminiConfigured, geminiChat } from '@/lib/gemini-provider';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -331,49 +332,32 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Provider 4: Gemini — FALLBACK ──
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
+    // ── Provider 4: Gemini — FALLBACK (auto-tries 2.0-flash → 1.5-flash → 1.5-pro) ──
+    if (isGeminiConfigured()) {
       console.log(`[copilot] 🤖 Trying Gemini provider...`);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT);
+        const result = await withTimeout(
+          geminiChat(COPILOT_ANALYSIS_PROMPT, {
+            imageBase64: base64,
+            mimeType,
+            temperature: 0.2,
+            maxOutputTokens: 4000,
+            timeout: PROVIDER_TIMEOUT,
+          }),
+          PROVIDER_TIMEOUT + 5_000,
+          'Gemini Vision'
+        );
 
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  { text: COPILOT_ANALYSIS_PROMPT },
-                  { inline_data: { mime_type: mimeType, data: base64 } },
-                ],
-              }],
-              generationConfig: { temperature: 0.2, maxOutputTokens: 4000 },
-            }),
-            signal: controller.signal,
-          }
-        ).finally(() => clearTimeout(timer));
-
-        if (response.ok) {
-          const data = await response.json();
-          const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          if (content && content.length > 10) {
-            const parsed = parseAIResponse(content);
-            if ('parsed' in parsed) {
-              console.log(`[copilot] ✅ Gemini analysis success, elapsed: ${Date.now() - startTime}ms`);
-              return NextResponse.json({ success: true, data: parsed.parsed, provider: 'Gemini 2.0 Flash' });
-            }
+        if (result.success && result.content) {
+          const parsed = parseAIResponse(result.content);
+          if ('parsed' in parsed) {
+            console.log(`[copilot] ✅ Gemini analysis success via ${result.model}, elapsed: ${Date.now() - startTime}ms`);
+            return NextResponse.json({ success: true, data: parsed.parsed, provider: `Gemini (${result.model})` });
           }
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn('[copilot] Gemini failed:', errMsg);
-        if (errMsg.includes('429') || errMsg.includes('quota')) {
-          console.error('[copilot] ⚠️ Gemini QUOTA EXCEEDED — Free tier has no quota. Upgrade at https://ai.google.dev/pricing');
-        }
       }
     }
 
@@ -433,7 +417,7 @@ export async function POST(req: NextRequest) {
       troubleshooting: {
         openai: isOpenAIConfigured() ? 'Configured but may have quota exceeded — add billing at https://platform.openai.com/account/billing' : 'Not configured — add OPENAI_API_KEY=sk-... to .env',
         azure: isAzureConfigured() ? 'Configured but deployment may not exist — check deployment names in Azure Portal' : 'Not configured — add AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT',
-        gemini: process.env.GEMINI_API_KEY ? 'Configured but free tier may have no quota — upgrade at https://ai.google.dev/pricing' : 'Not configured — add GEMINI_API_KEY',
+        gemini: isGeminiConfigured() ? 'Configured but all models (2.0-flash, 1.5-flash, 1.5-pro) returned 429 quota errors. Try regenerating the API key at https://aistudio.google.com/apikey or upgrade at https://ai.google.dev/pricing' : 'Not configured — add GEMINI_API_KEY',
       },
     });
   } catch (error) {

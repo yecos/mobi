@@ -265,61 +265,72 @@ async function tryGemini(base64: string, mimeType: string, retryCount = 0): Prom
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: 'GEMINI_API_KEY not configured' };
 
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT);
+  // Try multiple models in order — 2.0-flash may have quota 0 on some accounts
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: PROMPT_TEXT },
-              { inline_data: { mime_type: mimeType, data: base64 } },
-            ],
-          }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 8000 },
-        }),
-        signal: controller.signal,
-      }
-    ).finally(() => clearTimeout(timer));
+  for (const model of models) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT);
 
-    if (!response.ok) {
-      if (response.status === 429 && retryCount < MAX_RETRIES) {
-        const delay = RETRY_BASE_MS * (retryCount + 1);
-        console.warn(`[analyze] Gemini 429 rate limit, retrying in ${delay / 1000}s (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-        await sleep(delay);
-        return tryGemini(base64, mimeType, retryCount + 1);
-      }
-      if (response.status === 429) {
-        // Return the Retry-After header if available
-        const retryAfter = response.headers.get('Retry-After');
-        return {
-          success: false,
-          error: `Gemini rate limit exceeded.${retryAfter ? ` Retry after ${retryAfter}s.` : ' Please wait and try again.'}`,
-        };
-      }
-      const errorBody = await response.text().catch(() => '');
-      console.error(`[analyze] Gemini ${response.status}:`, errorBody.substring(0, 200));
-      return { success: false, error: `Gemini ${response.status}: ${errorBody.substring(0, 100) || 'Unknown error'}` };
-    }
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: PROMPT_TEXT },
+                { inline_data: { mime_type: mimeType, data: base64 } },
+              ],
+            }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8000 },
+          }),
+          signal: controller.signal,
+        }
+      ).finally(() => clearTimeout(timer));
 
-    const data = await response.json();
-    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    if (!content || content.length < 10) {
-      return { success: false, error: 'Gemini returned empty response' };
+      if (!response.ok) {
+        if (response.status === 429) {
+          if (retryCount < MAX_RETRIES) {
+            const delay = RETRY_BASE_MS * (retryCount + 1);
+            console.warn(`[analyze] Gemini ${model} 429 rate limit, retrying in ${delay / 1000}s (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+            await sleep(delay);
+            // Retry same model
+            const retryResult = await tryGemini(base64, mimeType, retryCount + 1);
+            if (retryResult.success) return retryResult;
+            // If retry failed, try next model
+            console.warn(`[analyze] Gemini ${model} retry failed, trying next model...`);
+            continue;
+          }
+          console.warn(`[analyze] Gemini ${model} quota exceeded after retries, trying next model...`);
+          continue;
+        }
+        const errorBody = await response.text().catch(() => '');
+        console.warn(`[analyze] Gemini ${model} ${response.status}:`, errorBody.substring(0, 200));
+        continue; // Try next model
+      }
+
+      const data = await response.json();
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!content || content.length < 10) {
+        console.warn(`[analyze] Gemini ${model} returned empty response, trying next model...`);
+        continue;
+      }
+      return { success: true, data: content, provider: `Gemini (${model})` };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('abort') || msg.includes('AbortError')) {
+        console.warn(`[analyze] Gemini ${model} timed out, trying next model...`);
+        continue;
+      }
+      console.warn(`[analyze] Gemini ${model} failed: ${msg}, trying next model...`);
+      continue;
     }
-    return { success: true, data: content, provider: 'Gemini 2.0 Flash' };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('abort') || msg.includes('AbortError')) {
-      return { success: false, error: 'Gemini request timed out' };
-    }
-    return { success: false, error: `Gemini failed: ${msg}` };
   }
+
+  return { success: false, error: `All Gemini models (${models.join(', ')}) failed or quota exceeded` };
 }
 
 /**

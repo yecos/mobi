@@ -103,43 +103,45 @@ export async function GET() {
     recommendations.push('Azure: No está configurado. Agrega AZURE_OPENAI_API_KEY y AZURE_OPENAI_ENDPOINT en las variables de entorno.');
   }
 
-  // ── Test 3: Gemini ──
+  // ── Test 3: Gemini (tries multiple models) ──
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Say OK' }] }],
-            generationConfig: { maxOutputTokens: 10 },
-          }),
-        }
-      );
-      const data = await response.json();
-      if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        results.gemini = { status: 'OK', response: data.candidates[0].content.parts[0].text };
-      } else {
-        const errorMsg = data.error?.message || JSON.stringify(data).slice(0, 300);
-        results.gemini = { status: 'FAILED', httpStatus: response.status, error: errorMsg };
+    const geminiModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+    let geminiOk = false;
+    const geminiModelResults: Record<string, unknown> = {};
 
-        if (response.status === 429 || errorMsg.includes('quota')) {
-          errors.gemini = 'insufficient_quota';
-          recommendations.push('Gemini: Plan gratuito sin cuota. Actualiza a plan de pago en https://ai.google.dev/pricing O espera a que se renueve la cuota gratuita.');
-        } else if (response.status === 400 && errorMsg.includes('API key')) {
-          errors.gemini = 'invalid_api_key';
-          recommendations.push('Gemini: API key inválida. Genera una nueva en https://aistudio.google.com/apikey');
+    for (const model of geminiModels) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'Say OK' }] }],
+              generationConfig: { maxOutputTokens: 10 },
+            }),
+          }
+        );
+        const data = await response.json();
+        if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          geminiModelResults[model] = { status: 'OK', response: data.candidates[0].content.parts[0].text };
+          if (!geminiOk) {
+            results.gemini = { status: 'OK', response: data.candidates[0].content.parts[0].text, model };
+            geminiOk = true;
+          }
         } else {
-          errors.gemini = 'unknown';
-          recommendations.push(`Gemini: Error (${response.status}). Verifica tu API key y configuración.`);
+          geminiModelResults[model] = { status: 'FAILED', httpStatus: response.status, error: (data.error?.message || '').slice(0, 100) };
         }
+      } catch (err) {
+        geminiModelResults[model] = { status: 'FAILED', error: err instanceof Error ? err.message : String(err) };
       }
-    } catch (err) {
-      results.gemini = { status: 'FAILED', error: err instanceof Error ? err.message : String(err) };
-      errors.gemini = 'connection_error';
-      recommendations.push('Gemini: Error de conexión. Verifica tu conexión a internet.');
+    }
+
+    if (!geminiOk) {
+      results.gemini = { status: 'FAILED', models: geminiModelResults, error: 'All Gemini models failed' };
+      errors.gemini = 'insufficient_quota';
+      recommendations.push('Gemini: Todos los modelos (2.0-flash, 1.5-flash, 1.5-pro) fallaron con error 429. Tu API key puede tener restricciones de región. Intenta: 1) Crear key en https://aistudio.google.com/apikey 2) Habilitar billing en https://ai.google.dev/pricing');
     }
   } else {
     results.gemini = { status: 'NOT CONFIGURED' };
