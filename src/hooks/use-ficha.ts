@@ -198,11 +198,9 @@ export function useFicha() {
       }
 
       if (!fichaImageSuccess) {
-        // Try to get troubleshooting info from the ficha image response
-        const quickFix = fichaImageRes?.status === 503 ? undefined : undefined;
         toast.error(isES
-          ? 'No se pudo generar la imagen de la ficha. Tu API key de OpenAI no tiene créditos. Agrega $5 USD en platform.openai.com/account/billing para desbloquear ChatGPT + DALL-E 3. Se usará la vista previa SVG.'
-          : 'Could not generate ficha image. Your OpenAI API key has no credits. Add $5 USD at platform.openai.com/account/billing to unlock ChatGPT + DALL-E 3. SVG preview will be used instead.',
+          ? 'No se pudo generar la imagen de la ficha. Necesitas un proveedor de IA con créditos. Agrega $5 USD en platform.openai.com/account/billing para ChatGPT + DALL-E 3, o genera una nueva API key en aistudio.google.com/apikey para Gemini. Se usará la vista previa SVG.'
+          : 'Could not generate ficha image. You need an AI provider with credits. Add $5 USD at platform.openai.com/account/billing for ChatGPT + DALL-E 3, or create a new API key at aistudio.google.com/apikey for Gemini. SVG preview will be used instead.',
           { duration: 15000 }
         );
       }
