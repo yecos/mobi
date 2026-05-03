@@ -140,8 +140,20 @@ export async function GET() {
 
     if (!geminiOk) {
       results.gemini = { status: 'FAILED', models: geminiModelResults, error: 'All Gemini models failed' };
-      errors.gemini = 'insufficient_quota';
-      recommendations.push('Gemini: Todos los modelos (2.0-flash, 1.5-flash, 1.5-pro) fallaron con error 429. Tu API key puede tener restricciones de región. Intenta: 1) Crear key en https://aistudio.google.com/apikey 2) Habilitar billing en https://ai.google.dev/pricing');
+      // Detect specific error type from model results
+      const modelErrors = Object.values(geminiModelResults)
+        .map((v) => (v as { error?: string }).error || '')
+        .join(' ');
+      if (modelErrors.includes('API key expired') || modelErrors.includes('API key not valid')) {
+        errors.gemini = 'api_key_expired';
+        recommendations.push('Gemini: Tu API key EXPIRÓ. Ve a https://aistudio.google.com/apikey y crea una NUEVA key. Luego reemplázala en Vercel → Environment Variables → GEMINI_API_KEY.');
+      } else if (modelErrors.includes('quota') || modelErrors.includes('429')) {
+        errors.gemini = 'insufficient_quota';
+        recommendations.push('Gemini: Cuota excedida. Espera unos minutos o actualiza a plan de pago en https://ai.google.dev/pricing');
+      } else {
+        errors.gemini = 'unknown';
+        recommendations.push('Gemini: Error desconocido. Intenta crear una nueva API key en https://aistudio.google.com/apikey');
+      }
     }
   } else {
     results.gemini = { status: 'NOT CONFIGURED' };
@@ -157,12 +169,14 @@ export async function GET() {
   // ── Priority recommendation ──
   let priorityAction = '';
   if (working.length === 0) {
-    if (errors.openai === 'insufficient_quota') {
+    if (errors.gemini === 'api_key_expired') {
+      priorityAction = 'ACCIÓN INMEDIATA: Tu API key de Gemini EXPIRÓ. Es la solución más rápida y GRATIS: 1) Ve a https://aistudio.google.com/apikey 2) Crea una NUEVA API key 3) Reemplázala en Vercel → Settings → Environment Variables → GEMINI_API_KEY 4) Redeploy. Gemini 1.5 Flash es gratis y soporta análisis de imágenes.';
+    } else if (errors.openai === 'insufficient_quota') {
       priorityAction = 'ACCIÓN INMEDIATA: Agrega créditos a tu cuenta de OpenAI en https://platform.openai.com/account/billing — Con $5 USD puedes usar ChatGPT (GPT-4o Vision + DALL-E 3) para generar fichas técnicas fotorrealistas. Esto es la solución más rápida y económica.';
     } else if (errors.azure === 'deployment_not_found') {
       priorityAction = 'ACCIÓN INMEDIATA: Tu Azure OpenAI está casi funcionando. Solo necesitas corregir los nombres de deployment. Ve a Azure Portal → Azure AI Studio → Deployments y copia los nombres exactos. Luego actualiza AZURE_OPENAI_DEPLOYMENT_NAME y AZURE_OPENAI_DALLE_DEPLOYMENT en Vercel.';
     } else if (errors.openai === 'not_configured') {
-      priorityAction = 'ACCIÓN INMEDIATA: Configura al menos un proveedor de IA. La opción más fácil es OpenAI: 1) Crea cuenta en https://platform.openai.com 2) Agrega $5 en billing 3) Genera API key en https://platform.openai.com/api-keys 4) Agrega OPENAI_API_KEY en Vercel Environment Variables.';
+      priorityAction = 'ACCIÓN INMEDIATA: Configura al menos un proveedor de IA. La opción más fácil es Gemini (gratis): 1) Ve a https://aistudio.google.com/apikey 2) Crea API key 3) Agrega GEMINI_API_KEY en Vercel. O usa OpenAI: 1) Crea cuenta en https://platform.openai.com 2) Agrega $5 en billing 3) Genera API key 4) Agrega OPENAI_API_KEY en Vercel.';
     } else {
       priorityAction = 'Ningún proveedor de IA está funcionando. Revisa las recomendaciones específicas abajo para cada proveedor.';
     }
