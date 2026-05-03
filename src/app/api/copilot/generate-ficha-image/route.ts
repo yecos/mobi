@@ -206,7 +206,11 @@ export async function POST(req: NextRequest) {
           console.log(`[copilot-ficha-image] ✅ OpenAI ficha image generated in ${Date.now() - startTime}ms`);
         }
       } catch (err) {
-        console.warn('[copilot-ficha-image] OpenAI failed:', err instanceof Error ? err.message : String(err));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn('[copilot-ficha-image] OpenAI failed:', errMsg);
+        if (errMsg.includes('429') || errMsg.includes('insufficient_quota') || errMsg.includes('quota')) {
+          console.error('[copilot-ficha-image] ⚠️ OpenAI QUOTA EXCEEDED — Add billing at https://platform.openai.com/account/billing');
+        }
       }
     } else {
       console.log('[copilot-ficha-image] ⏭️ OpenAI not configured (no valid API key), skipping');
@@ -330,12 +334,29 @@ export async function POST(req: NextRequest) {
 
     if (!imageBase64) {
       console.error(`[copilot-ficha-image] ❌ All providers failed after ${Date.now() - startTime}ms`);
+      console.error('[copilot-ficha-image] 💡 FIX: Add credits to OpenAI or configure Azure deployment names');
+
+      // Build specific troubleshooting info
+      const troubleshooting: Record<string, string> = {};
+      if (isOpenAIConfigured()) {
+        troubleshooting.openai = 'API key found but likely has quota exceeded (429). Add billing at https://platform.openai.com/account/billing';
+      } else {
+        troubleshooting.openai = 'Not configured. Add OPENAI_API_KEY=sk-... to environment variables';
+      }
+      if (isAzureConfigured()) {
+        troubleshooting.azure = `Configured (endpoint: ${process.env.AZURE_OPENAI_ENDPOINT}) but deployment not found. Current deployment names: chat="${process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o (default)'}", dalle="${process.env.AZURE_OPENAI_DALLE_DEPLOYMENT || 'dall-e-3 (default)'}". Check your deployment names in Azure Portal → Azure AI Studio.`;
+      } else {
+        troubleshooting.azure = 'Not configured. Add AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT';
+      }
+      troubleshooting.gemini = process.env.GEMINI_API_KEY
+        ? 'Configured but free tier has no image generation quota. Upgrade at https://ai.google.dev/pricing'
+        : 'Not configured. Add GEMINI_API_KEY';
+
       return NextResponse.json({
         success: false,
         error: 'Failed to generate ficha image — all AI image providers failed',
-        hint: isOpenAIConfigured()
-          ? 'OpenAI (ChatGPT) was tried but failed. Check your OPENAI_API_KEY.'
-          : 'No OpenAI API key configured. Add OPENAI_API_KEY=sk-... to .env for ChatGPT quality results.',
+        troubleshooting,
+        quickFix: 'Easiest fix: Add $5 credits to your OpenAI account at https://platform.openai.com/account/billing',
       }, { status: 503 });
     }
 

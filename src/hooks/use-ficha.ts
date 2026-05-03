@@ -127,16 +127,37 @@ export function useFicha() {
       // Show warning if estimated data — means NO AI provider worked
       if (analyzeData.isEstimated) {
         const noApiKey = analyzeData.provider?.includes('Smart Defaults');
-        toast.error(
-          noApiKey
-            ? (lang === 'en'
-                ? 'No AI provider available. Add your OpenAI API key (ChatGPT) in settings to enable AI analysis.'
-                : 'No hay proveedor de IA disponible. Agrega tu API key de OpenAI (ChatGPT) en configuración para habilitar el análisis con IA.')
-            : (lang === 'en'
-                ? 'AI partially unavailable. Some data is estimated — please verify and edit.'
-                : 'IA parcialmente no disponible. Algunos datos son estimados — verifica y edita.'),
-          { duration: 10000 }
-        );
+        // Check if we have troubleshooting info from the API
+        const ts = analyzeData.troubleshooting as Record<string, string> | undefined;
+        const hasQuotaIssue = ts?.openai?.includes('quota exceeded') || ts?.openai?.includes('billing');
+
+        if (hasQuotaIssue) {
+          toast.error(
+            isES
+              ? 'Tu API key de OpenAI no tiene créditos. Agrega método de pago en platform.openai.com/account/billing — Con $5 USD puedes usar ChatGPT para generar fichas.'
+              : 'Your OpenAI API key has no credits. Add billing at platform.openai.com/account/billing — $5 USD lets you use ChatGPT for fichas.',
+            { duration: 15000 }
+          );
+        } else if (noApiKey) {
+          toast.error(
+            isES
+              ? 'No hay proveedor de IA disponible. Agrega tu API key de OpenAI (ChatGPT) en Vercel → Environment Variables para habilitar el análisis con IA.'
+              : 'No AI provider available. Add your OpenAI API key (ChatGPT) in Vercel → Environment Variables to enable AI analysis.',
+            { duration: 10000 }
+          );
+        } else {
+          toast.error(
+            isES
+              ? 'IA parcialmente no disponible. Algunos datos son estimados — verifica y edita.'
+              : 'AI partially unavailable. Some data is estimated — please verify and edit.',
+            { duration: 10000 }
+          );
+        }
+
+        // Also log troubleshooting info for debugging
+        if (ts) {
+          console.warn('[ficha] Troubleshooting:', JSON.stringify(ts, null, 2));
+        }
       }
 
       // ═══════════════════════════════════════════════════════════
@@ -177,10 +198,12 @@ export function useFicha() {
       }
 
       if (!fichaImageSuccess) {
+        // Try to get troubleshooting info from the ficha image response
+        const quickFix = fichaImageRes?.status === 503 ? undefined : undefined;
         toast.error(isES
-          ? 'No se pudo generar la imagen de la ficha. Necesitas una API key de OpenAI (ChatGPT) para generar imágenes con IA. Se usará la vista previa SVG.'
-          : 'Could not generate ficha image. You need an OpenAI API key (ChatGPT) to generate AI images. SVG preview will be used instead.',
-          { duration: 10000 }
+          ? 'No se pudo generar la imagen de la ficha. Tu API key de OpenAI no tiene créditos. Agrega $5 USD en platform.openai.com/account/billing para desbloquear ChatGPT + DALL-E 3. Se usará la vista previa SVG.'
+          : 'Could not generate ficha image. Your OpenAI API key has no credits. Add $5 USD at platform.openai.com/account/billing to unlock ChatGPT + DALL-E 3. SVG preview will be used instead.',
+          { duration: 15000 }
         );
       }
 

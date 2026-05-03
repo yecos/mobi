@@ -252,7 +252,12 @@ export async function POST(req: NextRequest) {
           console.warn('[copilot] OpenAI response parse failed, trying fallback...');
         }
       } catch (err) {
-        console.warn('[copilot] OpenAI failed:', err instanceof Error ? err.message : String(err));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn('[copilot] OpenAI failed:', errMsg);
+        // Track quota errors for better user messaging
+        if (errMsg.includes('429') || errMsg.includes('insufficient_quota') || errMsg.includes('quota')) {
+          console.error('[copilot] ⚠️ OpenAI QUOTA EXCEEDED — User needs to add billing at https://platform.openai.com/account/billing');
+        }
       }
     } else {
       console.log('[copilot] ⏭️ OpenAI not configured (no valid API key), skipping');
@@ -318,7 +323,11 @@ export async function POST(req: NextRequest) {
           console.warn('[copilot] Azure OpenAI response parse failed, trying fallback...');
         }
       } catch (err) {
-        console.warn('[copilot] Azure OpenAI failed:', err instanceof Error ? err.message : String(err));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn('[copilot] Azure OpenAI failed:', errMsg);
+        if (errMsg.includes('404') || errMsg.includes('DeploymentNotFound')) {
+          console.error('[copilot] ⚠️ Azure deployment not found — Check AZURE_OPENAI_DEPLOYMENT_NAME and AZURE_OPENAI_DALLE_DEPLOYMENT env vars in Azure Portal');
+        }
       }
     }
 
@@ -360,7 +369,11 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        console.warn('[copilot] Gemini failed:', err instanceof Error ? err.message : String(err));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn('[copilot] Gemini failed:', errMsg);
+        if (errMsg.includes('429') || errMsg.includes('quota')) {
+          console.error('[copilot] ⚠️ Gemini QUOTA EXCEEDED — Free tier has no quota. Upgrade at https://ai.google.dev/pricing');
+        }
       }
     }
 
@@ -394,6 +407,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.error(`[copilot] ❌ All AI providers failed after ${Date.now() - startTime}ms, using smart defaults`);
+    console.error('[copilot] 💡 FIX: Add credits to OpenAI (https://platform.openai.com/account/billing) OR configure correct Azure deployment names');
 
     // ── Ultimate fallback with smart defaults ──
     const fallbackData = {
@@ -416,6 +430,11 @@ export async function POST(req: NextRequest) {
       provider: 'Smart Defaults (AI unavailable)',
       isEstimated: true,
       warning: 'AI vision was unavailable. Showing estimated data — please verify and edit.',
+      troubleshooting: {
+        openai: isOpenAIConfigured() ? 'Configured but may have quota exceeded — add billing at https://platform.openai.com/account/billing' : 'Not configured — add OPENAI_API_KEY=sk-... to .env',
+        azure: isAzureConfigured() ? 'Configured but deployment may not exist — check deployment names in Azure Portal' : 'Not configured — add AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT',
+        gemini: process.env.GEMINI_API_KEY ? 'Configured but free tier may have no quota — upgrade at https://ai.google.dev/pricing' : 'Not configured — add GEMINI_API_KEY',
+      },
     });
   } catch (error) {
     console.error('[copilot] Unexpected error:', error);
