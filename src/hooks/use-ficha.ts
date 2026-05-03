@@ -124,13 +124,18 @@ export function useFicha() {
       const provider = analyzeData.provider || 'Unknown';
       console.log(`[ficha] Analysis complete via ${provider}`);
 
-      // Show warning if estimated data
+      // Show warning if estimated data — means NO AI provider worked
       if (analyzeData.isEstimated) {
-        toast.warning(
-          lang === 'en'
-            ? 'AI partially unavailable. Some data is estimated — please verify and edit.'
-            : 'IA parcialmente no disponible. Algunos datos son estimados — verifica y edita.',
-          { duration: 8000 }
+        const noApiKey = analyzeData.provider?.includes('Smart Defaults');
+        toast.error(
+          noApiKey
+            ? (lang === 'en'
+                ? 'No AI provider available. Add your OpenAI API key (ChatGPT) in settings to enable AI analysis.'
+                : 'No hay proveedor de IA disponible. Agrega tu API key de OpenAI (ChatGPT) en configuración para habilitar el análisis con IA.')
+            : (lang === 'en'
+                ? 'AI partially unavailable. Some data is estimated — please verify and edit.'
+                : 'IA parcialmente no disponible. Algunos datos son estimados — verifica y edita.'),
+          { duration: 10000 }
         );
       }
 
@@ -172,10 +177,10 @@ export function useFicha() {
       }
 
       if (!fichaImageSuccess) {
-        toast.warning(isES
-          ? 'No se pudo generar la imagen de la ficha. Se usará la vista previa SVG.'
-          : 'Could not generate ficha image. SVG preview will be used instead.',
-          { duration: 6000 }
+        toast.error(isES
+          ? 'No se pudo generar la imagen de la ficha. Necesitas una API key de OpenAI (ChatGPT) para generar imágenes con IA. Se usará la vista previa SVG.'
+          : 'Could not generate ficha image. You need an OpenAI API key (ChatGPT) to generate AI images. SVG preview will be used instead.',
+          { duration: 10000 }
         );
       }
 
