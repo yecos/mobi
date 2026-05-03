@@ -7,10 +7,11 @@ import { toast } from 'sonner';
 
 /**
  * Hook for the main Ficha flow:
- * 1. Analyze image → get CopilotFurnitureData (JS object)
- * 2. Edit data (dimensions, materials, colors, etc.)
- * 3. Review before export
- * 4. Export PDF, SVG, or PNG
+ * 1. Analyze image → get CopilotFurnitureData (JS object) + generate ficha image
+ * 2. WAIT for ficha image before going to editor
+ * 3. Edit data (dimensions, materials, colors, etc.)
+ * 4. Review before export
+ * 5. Export PDF, SVG, or PNG
  */
 export function useFicha() {
   const lang = useAppStore((s) => s.lang);
@@ -37,7 +38,13 @@ export function useFicha() {
   const clearAnalysisMessages = useAppStore((s) => s.clearAnalysisMessages);
 
   /**
-   * Step 1: Analyze image with the VIVA MOBILI prompt → get JS object + generate ficha image
+   * Step 1: Analyze image → WAIT for ficha image → THEN go to editor
+   *
+   * The flow is:
+   * 1. Call /api/copilot (analysis) → get furniture data JSON
+   * 2. Call /api/copilot/generate-ficha-image → get photorealistic ficha image
+   * 3. Call /api/copilot/generate-views → get 4 views (in parallel, non-blocking)
+   * 4. THEN go to ficha-editing screen with everything ready
    */
   const analyzeFicha = useCallback(async () => {
     if (!imageBase64) return;
@@ -49,18 +56,36 @@ export function useFicha() {
     clearCopilotMessages();
     clearAnalysisMessages();
 
-    // Show progress messages
+    // Show progress messages - MORE steps to match the full flow
     const isES = lang === 'es';
     const messages = isES
-      ? ['Identificando tipo de mobiliario...', 'Extrayendo dimensiones...', 'Analizando materiales y acabado...', 'Detectando características distintivas...', 'Generando ficha técnica VIVA MOBILI...', 'Preparando datos editables y vista previa...']
-      : ['Identifying furniture type...', 'Extracting dimensions...', 'Analyzing materials & finish...', 'Detecting distinctive features...', 'Generating VIVA MOBILI product sheet...', 'Preparing editable data & preview...'];
+      ? [
+          'Enviando imagen a ChatGPT...',
+          'Analizando tipo de mobiliario...',
+          'Extrayendo dimensiones y materiales...',
+          'Detectando características distintivas...',
+          'Generando datos de la ficha técnica...',
+          'Creando imagen fotorrealista con IA...',
+          'Renderizando vistas del producto...',
+          'Preparando ficha editable...',
+        ]
+      : [
+          'Sending image to ChatGPT...',
+          'Analyzing furniture type...',
+          'Extracting dimensions & materials...',
+          'Detecting distinctive features...',
+          'Generating product sheet data...',
+          'Creating photorealistic image with AI...',
+          'Rendering product views...',
+          'Preparing editable sheet...',
+        ];
     let msgIndex = 0;
     const msgInterval = setInterval(() => {
       if (msgIndex < messages.length) {
         addAnalysisMessage(messages[msgIndex]);
         msgIndex++;
       }
-    }, 3000);
+    }, 4000);
 
     const userMsg: CopilotMessage = {
       id: `user-${Date.now()}`,
@@ -74,11 +99,14 @@ export function useFicha() {
     addCopilotMessage(userMsg);
 
     try {
+      // ═══════════════════════════════════════════════════════════
+      // PHASE 1: Analysis (ChatGPT/Z-AI Vision → JSON data)
+      // ═══════════════════════════════════════════════════════════
       const analyzeRes = await fetch('/api/copilot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageBase64 }),
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(120_000),
       });
 
       if (!analyzeRes.ok) {
@@ -93,21 +121,8 @@ export function useFicha() {
       const furnitureData = analyzeData.data as CopilotFurnitureData;
       setCopilotData(furnitureData);
 
-      // Clear progress messages interval
-      clearInterval(msgInterval);
-      addAnalysisMessage(lang === 'es' ? '¡Análisis completo! Generando vistas...' : 'Analysis complete! Generating views...');
-
-      // Add assistant message
-      const assistantMsg: CopilotMessage = {
-        id: `asst-${Date.now()}`,
-        role: 'assistant',
-        content: lang === 'en'
-          ? `Analysis complete! I identified a **${furnitureData.style} ${furnitureData.productType}** made of **${furnitureData.material.main}** with a **${furnitureData.finish}** finish.\n\nFeature: ${furnitureData.feature}\nDimensions: ${furnitureData.dimensions.height}×${furnitureData.dimensions.width}×${furnitureData.dimensions.depth} cm${furnitureData.dimensions.seatHeight ? ` (Seat: ${furnitureData.dimensions.seatHeight}cm)` : ''}\n\nThe ficha image is ready! You can now **edit the data** and the preview updates in real-time.`
-          : `¡Análisis completo! Identifiqué un **${furnitureData.productType} de estilo ${furnitureData.style}** hecho de **${furnitureData.material.main}** con acabado **${furnitureData.finish}**.\n\nCaracterística: ${furnitureData.feature}\nDimensiones: ${furnitureData.dimensions.height}×${furnitureData.dimensions.width}×${furnitureData.dimensions.depth} cm${furnitureData.dimensions.seatHeight ? ` (Asiento: ${furnitureData.dimensions.seatHeight}cm)` : ''}\n\n¡La ficha imagen está lista! Ahora puedes **editar los datos** y la vista previa se actualiza en tiempo real.`,
-        timestamp: Date.now(),
-        furnitureData,
-      };
-      addCopilotMessage(assistantMsg);
+      const provider = analyzeData.provider || 'Unknown';
+      console.log(`[ficha] Analysis complete via ${provider}`);
 
       // Show warning if estimated data
       if (analyzeData.isEstimated) {
@@ -119,12 +134,97 @@ export function useFicha() {
         );
       }
 
-      // Go to ficha editing screen (SVG preview is built client-side in useMemo)
-      setState('ficha-editing');
+      // ═══════════════════════════════════════════════════════════
+      // PHASE 2: Generate ficha image (WAIT for this before going to editor)
+      // This is the key step - we DON'T go to editor until the image is ready
+      // ═══════════════════════════════════════════════════════════
+      addAnalysisMessage(isES
+        ? 'Generando imagen fotorrealista de la ficha técnica...'
+        : 'Generating photorealistic ficha image...'
+      );
 
-      // Fire-and-forget: generate AI photorealistic views + ficha image in background
-      generateViewsInBackground(furnitureData);
-      generateFichaImageInBackground(furnitureData);
+      let fichaImageSuccess = false;
+      try {
+        const fichaImageRes = await fetch('/api/copilot/generate-ficha-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            furnitureData,
+            originalImage: imageBase64,
+          }),
+          signal: AbortSignal.timeout(120_000),
+        });
+
+        if (fichaImageRes.ok) {
+          const fichaImageResult = await fichaImageRes.json();
+          if (fichaImageResult.success && fichaImageResult.image) {
+            setFichaAiImage(fichaImageResult.image);
+            fichaImageSuccess = true;
+            console.log(`[ficha] Ficha image generated via ${fichaImageResult.provider || 'unknown'}`);
+          } else {
+            console.warn('[ficha] Ficha image generation returned no image:', fichaImageResult.error);
+          }
+        } else {
+          console.warn(`[ficha] Ficha image generation failed: ${fichaImageRes.status}`);
+        }
+      } catch (fichaImgErr) {
+        console.warn('[ficha] Ficha image generation error:', fichaImgErr instanceof Error ? fichaImgErr.message : String(fichaImgErr));
+      }
+
+      if (!fichaImageSuccess) {
+        toast.warning(isES
+          ? 'No se pudo generar la imagen de la ficha. Se usará la vista previa SVG.'
+          : 'Could not generate ficha image. SVG preview will be used instead.',
+          { duration: 6000 }
+        );
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // PHASE 3: Generate views (can be in parallel, but we still wait)
+      // ═══════════════════════════════════════════════════════════
+      addAnalysisMessage(isES
+        ? 'Renderizando vistas del producto...'
+        : 'Rendering product views...'
+      );
+
+      try {
+        const viewsRes = await fetch('/api/copilot/generate-views', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ furnitureData, views: ['front', 'side', 'top', 'perspective'] }),
+          signal: AbortSignal.timeout(120_000),
+        });
+
+        if (viewsRes.ok) {
+          const viewsResult = await viewsRes.json();
+          if (viewsResult.success && viewsResult.viewImages) {
+            setCopilotViewImages(viewsResult.viewImages);
+            console.log(`[ficha] Generated ${viewsResult.generatedCount || 0} views`);
+          }
+        }
+      } catch (viewsErr) {
+        console.warn('[ficha] View generation error:', viewsErr instanceof Error ? viewsErr.message : String(viewsErr));
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // PHASE 4: NOW go to the editor — everything is ready!
+      // ═══════════════════════════════════════════════════════════
+      clearInterval(msgInterval);
+
+      // Add assistant message with results
+      const assistantMsg: CopilotMessage = {
+        id: `asst-${Date.now()}`,
+        role: 'assistant',
+        content: lang === 'en'
+          ? `Analysis complete! I identified a **${furnitureData.style} ${furnitureData.productType}** made of **${furnitureData.material.main}** with a **${furnitureData.finish}** finish.\n\nFeature: ${furnitureData.feature}\nDimensions: ${furnitureData.dimensions.height}×${furnitureData.dimensions.width}×${furnitureData.dimensions.depth} cm${furnitureData.dimensions.seatHeight ? ` (Seat: ${furnitureData.dimensions.seatHeight}cm)` : ''}\n\nThe ficha image is ready! You can now **edit the data** and the preview updates in real-time.`
+          : `¡Análisis completo! Identifiqué un **${furnitureData.productType} de estilo ${furnitureData.style}** hecho de **${furnitureData.material.main}** con acabado **${furnitureData.finish}**.\n\nCaracterística: ${furnitureData.feature}\nDimensiones: ${furnitureData.dimensions.height}×${furnitureData.dimensions.width}×${furnitureData.dimensions.depth} cm${furnitureData.dimensions.seatHeight ? ` (Asiento: ${furnitureData.dimensions.seatHeight}cm)` : ''}\n\n¡La ficha imagen está lista! Ahora puedes **editar los datos** y la vista previa se actualiza en tiempo real.`,
+        timestamp: Date.now(),
+        furnitureData,
+      };
+      addCopilotMessage(assistantMsg);
+
+      // FINALLY go to editor — AI has finished all its work
+      setState('ficha-editing');
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -151,48 +251,7 @@ export function useFicha() {
     } finally {
       setCopilotLoading(false);
     }
-  }, [imageBase64, lang, setState, setCopilotLoading, setCopilotData, setCopilotSheetPdf, setCopilotSheetSvg, setFichaAiImage, addCopilotMessage, clearCopilotMessages, addAnalysisMessage, clearAnalysisMessages]);
-
-  /**
-   * Generate AI photorealistic views in the background (fire-and-forget)
-   */
-  const generateViewsInBackground = useCallback(async (data: CopilotFurnitureData) => {
-    try {
-      const res = await fetch('/api/copilot/generate-views', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ furnitureData: data, views: ['front', 'side', 'top', 'perspective'] }),
-      });
-      const result = await res.json();
-      if (result.success && result.viewImages) {
-        setCopilotViewImages(result.viewImages);
-      }
-    } catch (err) {
-      console.warn('[ficha] Background view generation failed:', err);
-    }
-  }, [setCopilotViewImages]);
-
-  /**
-   * Generate AI ficha image in the background (fire-and-forget)
-   */
-  const generateFichaImageInBackground = useCallback(async (data: CopilotFurnitureData) => {
-    try {
-      const res = await fetch('/api/copilot/generate-ficha-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          furnitureData: data,
-          originalImage: imageBase64, // Pass original furniture image for reference
-        }),
-      });
-      const result = await res.json();
-      if (result.success && result.image) {
-        setFichaAiImage(result.image);
-      }
-    } catch (err) {
-      console.warn('[ficha] Background ficha image generation failed:', err);
-    }
-  }, [setFichaAiImage, imageBase64]);
+  }, [imageBase64, lang, setState, setCopilotLoading, setCopilotData, setFichaAiImage, setCopilotViewImages, addCopilotMessage, clearCopilotMessages, addAnalysisMessage, clearAnalysisMessages]);
 
   /**
    * Step 2: After editing, go to review screen
