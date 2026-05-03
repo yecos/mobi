@@ -82,8 +82,10 @@ export async function GET() {
 
       if (e.status === 404 || errorMsg.includes('DeploymentNotFound') || errorMsg.includes('does not exist')) {
         errors.azure = 'deployment_not_found';
+        const chatDeploy = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o (default)';
+        const dalleDeploy = process.env.AZURE_OPENAI_DALLE_DEPLOYMENT || 'dall-e-3 (default)';
         recommendations.push(
-          `Azure: Los nombres de deployment NO coinciden. Tienes configurado chat="${process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o (default)'}" y dalle="${process.env.AZURE_OPENAI_DALLE_DEPLOYMENT || 'dall-e-3 (default')}". ` +
+          `Azure: Los nombres de deployment NO coinciden. Tienes configurado chat="${chatDeploy}" y dalle="${dalleDeploy}". ` +
           `Ve a Azure Portal → Azure AI Studio → Deployments y verifica los nombres exactos. ` +
           `Luego actualiza las variables AZURE_OPENAI_DEPLOYMENT_NAME y AZURE_OPENAI_DALLE_DEPLOYMENT en Vercel.`
         );
